@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+
+# Helm build artifacts (vendored subcharts produced by `helm dependency build`)
+charts/*.tgz
+charts/**/charts/*.tgz
+
+# Local overrides
+*.local.yaml
+values-*.local.yaml

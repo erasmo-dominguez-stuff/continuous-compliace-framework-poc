@@ -40,6 +40,13 @@ ccf/                       umbrella chart (depends on the two below)
 - Helm 3.8+
 - A default StorageClass (for the PostgreSQL PVC) when `postgres.persistence.enabled=true`
 
+For a local cluster you can use either:
+
+- **`kind`** (`kind` + `kubectl` + `helm`), or
+- **Docker Desktop Kubernetes** (`docker` with Kubernetes enabled + `kubectl` + `helm`).
+
+Both are driven by the `Makefile` (see [Local deployment](#local-deployment)).
+
 ## Install
 
 Full stack via the umbrella (one command):
@@ -60,21 +67,58 @@ helm install ccf-agent charts/ccf-agent -n ccf \
 > Values are **top-level** in each subchart (e.g. `api.replicaCount`), and
 > **namespaced** in the umbrella (e.g. `ccf-app.api.replicaCount`).
 
-## Local deployment (kind)
+## Local deployment
 
-A `Makefile` wraps the full local flow (requires `kind`, `kubectl`, `helm`):
+The `Makefile` wraps the full local flow and supports **two local Kubernetes
+runtimes** via the `RUNTIME` variable:
+
+| `RUNTIME` | Cluster                          | kube-context     |
+|-----------|----------------------------------|------------------|
+| `kind`    | local `kind` cluster (default)   | `kind-ccf`       |
+| `docker`  | Docker Desktop Kubernetes        | `docker-desktop` |
+
+Every `helm`/`kubectl` command issued by the `Makefile` is pinned to the
+selected context, so you never deploy to the wrong cluster by accident.
+
+### Option A — kind (default)
+
+Requires `kind`, `kubectl`, `helm`:
 
 ```bash
-make kind-up        # create a local kind cluster
-make install-local  # helm install with values-local.yaml
-make pf             # port-forward UI (8000) and API (8080)
+make up        # create cluster + helm install with values-local.yaml
+make pf        # port-forward UI (8000) and API (8080)
 ```
+
+### Option B — Docker Desktop Kubernetes
+
+Requires Docker Desktop with Kubernetes enabled
+(**Settings → Kubernetes → Enable Kubernetes**), plus `kubectl` and `helm`:
+
+```bash
+make up-docker  # verify the docker-desktop context + helm install
+make pf-docker  # port-forward UI (8000) and API (8080)
+```
+
+`make up-docker` is shorthand for `make RUNTIME=docker up`; any target accepts
+the `RUNTIME=docker` override (e.g. `make RUNTIME=docker status`). It checks
+that the `docker-desktop` context exists and is reachable before installing, so
+you get a clear error if Kubernetes is not enabled in Docker Desktop.
+
+### After it's up (both options)
 
 Open http://localhost:8000. The UI talks to the API at `http://localhost:8080`
 (`ui.apiUrl` in `values-local.yaml`), matching the port-forward.
 
-`values-local.yaml` disables persistence and trims resources for laptops.
-Tear down with `make uninstall` / `make kind-down`.
+`values-local.yaml` disables persistence and trims resources for laptops; it
+works unchanged on both runtimes. Tear down with:
+
+```bash
+make down         # kind: uninstall release + delete the cluster
+make down-docker  # docker: uninstall release (cluster keeps running)
+```
+
+> The bundled `helm dependency build` step (subchart vendoring) runs
+> automatically before every install via the `deps` target.
 
 ## Quick local access (no ingress)
 
@@ -201,6 +245,10 @@ Critical items addressed by `values-production.yaml` (review every `CHANGE-ME`):
 
   The chart fails fast if `postgres.auth.existingSecret` is set without a
   matching `api.database.existingSecret`/`connection`.
+- **Agent plugins**: the agent **fails to start with no plugins configured**
+  (`panic: no plugins specified in config`). Configure at least one plugin under
+  `ccf-agent.config.plugins` (see `values-local.yaml` for a working example),
+  or set `ccf-agent.enabled=false` if you only need the control plane.
 - **High availability**: API/UI run 2+ replicas with pod anti-affinity, HPA and
   PodDisruptionBudgets.
 - **Database**: the bundled PostgreSQL is a single replica with no backups —

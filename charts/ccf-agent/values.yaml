@@ -22,8 +22,11 @@ serviceAccount:
 # ccf-app API Service name. Override when the API lives elsewhere.
 apiUrl: "http://ccf-api:8080"
 
-# -- Command/args for the agent container. Config is mounted at /etc/ccf/config.yml.
-command: []
+# -- Command/args for the agent container. The image's binary is `concom`
+# (working dir /app); the `agent` subcommand reads the config mounted at
+# /etc/ccf/config.yml.
+command:
+  - ./concom
 args:
   - agent
   - -c
@@ -31,6 +34,9 @@ args:
 
 # -- Agent configuration rendered to /etc/ccf/config.yml.
 # api.url is injected from .Values.apiUrl when left empty here.
+# NOTE: the agent panics on startup if `plugins` is empty
+# ("no plugins specified in config"). Configure at least one plugin below
+# (see values-local.yaml for a working example) or disable the agent.
 config:
   daemon: true
   verbosity: 2

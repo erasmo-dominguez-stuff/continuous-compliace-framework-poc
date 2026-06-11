@@ -1,0 +1,9 @@
+dependencies:
+- name: ccf-app
+  repository: file://charts/ccf-app
+  version: 0.1.0
+- name: ccf-agent
+  repository: file://charts/ccf-agent
+  version: 0.1.0
+digest: sha256:ada20ca1b11d9475e90835f1ae2c867c4a96952ae3ede4f5f4b64ed75d93abed
+generated: "2026-06-11T12:50:55.763874+01:00"

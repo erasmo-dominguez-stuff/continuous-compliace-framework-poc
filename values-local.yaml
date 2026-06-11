@@ -41,3 +41,17 @@ ccf-agent:
     requests:
       cpu: 25m
       memory: 64Mi
+  # The agent panics on startup if no plugins are configured. A self-contained
+  # example (local SSH hardening checks) is enabled so `make up` yields a fully
+  # running stack out of the box. Replace with the plugins relevant to you.
+  config:
+    daemon: true
+    verbosity: 2
+    plugins:
+      local-ssh:
+        schedule: "*/10 * * * *"
+        source: ghcr.io/compliance-framework/plugin-local-ssh:v0.2.0
+        policies:
+          - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.2.0
+        labels:
+          group: local

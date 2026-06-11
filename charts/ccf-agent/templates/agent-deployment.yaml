@@ -48,11 +48,17 @@ spec:
               readOnly: true
             - name: cache
               mountPath: /tmp
+            # Writable workdir where the agent unpacks plugins/policies.
+            # Required when securityContext.readOnlyRootFilesystem is enabled.
+            - name: ccf-data
+              mountPath: /app/.compliance-framework
       volumes:
         - name: config
           configMap:
             name: {{ include "ccf-agent.fullname" . }}
         - name: cache
+          emptyDir: {}
+        - name: ccf-data
           emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
