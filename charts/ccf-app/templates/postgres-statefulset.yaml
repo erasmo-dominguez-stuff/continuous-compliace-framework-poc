@@ -47,6 +47,10 @@ spec:
                 - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
             initialDelaySeconds: 30
             periodSeconds: 10
+            # pg_isready can exceed the 1s default timeout under load (laptops),
+            # causing spurious restarts. Give it room and tolerate flaps.
+            timeoutSeconds: 5
+            failureThreshold: 6
           readinessProbe:
             exec:
               command:
@@ -55,6 +59,8 @@ spec:
                 - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
           volumeMounts:

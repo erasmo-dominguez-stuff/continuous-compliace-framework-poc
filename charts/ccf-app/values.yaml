@@ -116,12 +116,16 @@ api:
       port: http
     initialDelaySeconds: 15
     periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 6
   readinessProbe:
     httpGet:
       path: /api/auth/publickey
       port: http
     initialDelaySeconds: 10
     periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
   resources: {}
   autoscaling:
     enabled: false
