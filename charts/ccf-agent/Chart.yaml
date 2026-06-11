@@ -6,7 +6,7 @@ description: |
   with different plugin sets) against a CCF API. See https://continuouscompliance.io/
 type: application
 version: 0.1.0
-appVersion: "0.2.1"
+appVersion: "0.7.1"
 keywords:
   - compliance
   - ccf

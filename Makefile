@@ -41,6 +41,28 @@ endif
 HELM_CTX := --kube-context $(KUBE_CONTEXT)
 KUBECTL  := kubectl --context $(KUBE_CONTEXT)
 
+# ---------------------------------------------------------------- values layout
+# Environment overlays live in values/, plugin overlays in values/plugins/.
+# They are layered: environment first, then one or more reusable plugin overlays.
+ENV_LOCAL    ?= values/local.yaml
+ENV_AKS      ?= values/aks.yaml
+
+# Space-separated list of plugin overlays to layer on top (override freely):
+#   make up PLUGIN_VALUES="values/plugins/github.yaml"
+#   make up PLUGIN_VALUES="values/plugins/local-ssh.yaml values/plugins/github.yaml"
+PLUGIN_VALUES ?= values/plugins/local-ssh.yaml
+PLUGIN_ARGS   := $(foreach f,$(PLUGIN_VALUES),-f $(f))
+
+# Optional GitHub plugin credentials, injected only when provided (kept out of
+# git): make up PLUGIN_VALUES=values/plugins/github.yaml GITHUB_TOKEN=... GITHUB_ORG=...
+GH_ARGS :=
+ifneq ($(strip $(GITHUB_TOKEN)),)
+GH_ARGS += --set-string ccf-agent.config.plugins.github_repos.config.token=$(GITHUB_TOKEN)
+endif
+ifneq ($(strip $(GITHUB_ORG)),)
+GH_ARGS += --set-string ccf-agent.config.plugins.github_repos.config.organization=$(GITHUB_ORG)
+endif
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
@@ -140,21 +162,59 @@ lint: ## helm lint umbrella + subcharts
 	helm lint $(CHART_DIR)/charts/ccf-app
 	helm lint $(CHART_DIR)/charts/ccf-agent
 
-.PHONY: template-local
-template-local: deps ## Render umbrella manifests with local values
-	helm template $(RELEASE) $(CHART_DIR) -f values-local.yaml
+## ---------------------------------------------------------------- validate & test
+.PHONY: validate
+validate: deps lint template-all ## Offline validation: lint + render every env/plugin combo
+	@echo "OK: charts lint and every environment x plugin overlay renders."
 
-.PHONY: install-local
-install-local: deps ## Install/upgrade the full stack (umbrella) with local values
+.PHONY: template-all
+template-all: deps ## Render every environment x plugin overlay combination (no cluster needed)
+	@set -e; \
+	for env in $(ENV_LOCAL) $(ENV_AKS); do \
+		echo "--- $$env (base, no plugins) ---"; \
+		helm template $(RELEASE) $(CHART_DIR) -f $$env >/dev/null; \
+		for plugin in values/plugins/*.yaml; do \
+			echo "--- $$env + $$plugin ---"; \
+			helm template $(RELEASE) $(CHART_DIR) -f $$env -f $$plugin \
+				--set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
+				--set-string ccf-agent.config.plugins.github_repos.config.organization=dummy >/dev/null; \
+		done; \
+	done; \
+	echo "all combinations rendered successfully"
+
+.PHONY: dry-run
+dry-run: deps ## Server-side dry-run against the selected cluster (validates vs the API server)
 	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f values-local.yaml --wait --timeout 5m
+		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) --dry-run=server
+
+.PHONY: smoke
+smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
+	$(KUBECTL) -n $(NAMESPACE) rollout status statefulset/$(RELEASE)-postgres --timeout=180s
+	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/$(RELEASE)-api --timeout=180s
+	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/$(RELEASE)-ui --timeout=180s
+	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/ccf-agent --timeout=180s
+	@$(MAKE) --no-print-directory test
+
+.PHONY: test
+test: ## Run helm test hooks (in-cluster API/UI connectivity)
+	helm test $(RELEASE) -n $(NAMESPACE) $(HELM_CTX) --logs
+
+.PHONY: template-local
+template-local: deps ## Render umbrella manifests with local + plugin overlays
+	helm template $(RELEASE) $(CHART_DIR) -f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS)
+
+.PHONY: install-local
+install-local: deps ## Install/upgrade the full stack with local + plugin overlays
+	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
+		--namespace $(NAMESPACE) --create-namespace \
+		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) --wait --timeout 5m
 
 .PHONY: install-aks
-install-aks: deps ## Install CCF on the CURRENT kube-context (e.g. AKS) with values-aks.yaml
+install-aks: deps ## Install on the CURRENT kube-context (e.g. AKS) with aks + plugin overlays
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f values-aks.yaml --wait --timeout 8m
+		-f $(ENV_AKS) $(PLUGIN_ARGS) $(GH_ARGS) --wait --timeout 8m
 
 .PHONY: install-app
 install-app: deps ## Install ccf-app standalone (production values)

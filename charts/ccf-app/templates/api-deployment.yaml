@@ -28,8 +28,9 @@ spec:
       serviceAccountName: {{ include "ccf.serviceAccountName" . }}
       securityContext:
         {{- toYaml (default .Values.podSecurityContext .Values.api.podSecurityContext) | nindent 8 }}
-      {{- if .Values.postgres.enabled }}
+      {{- if or .Values.postgres.enabled .Values.api.migrations.enabled }}
       initContainers:
+        {{- if .Values.postgres.enabled }}
         - name: wait-for-postgres
           image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
           imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
@@ -40,6 +41,28 @@ spec:
               until pg_isready -h {{ include "ccf.postgres.fullname" . }} -p {{ .Values.postgres.service.port }}; do
                 echo "waiting for postgres..."; sleep 2;
               done
+        {{- end }}
+        {{- if .Values.api.migrations.enabled }}
+        # Ensure the DB schema exists before the API starts. `migrate up` is
+        # idempotent; without it, login fails (the user tables don't exist).
+        - name: migrate
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/api", "migrate", "up"]
+          securityContext:
+            {{- toYaml (default .Values.securityContext .Values.api.securityContext) | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- if or (not .Values.api.database.existingSecret) .Values.api.jwtSecret }}
+            - secretRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- end }}
+            {{- if .Values.api.database.existingSecret }}
+            - secretRef:
+                name: {{ .Values.api.database.existingSecret }}
+            {{- end }}
+        {{- end }}
       {{- end }}
       containers:
         - name: api

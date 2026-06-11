@@ -1,0 +1,20 @@
+# Reusable plugin overlay: local SSH hardening checks (plugin-local-ssh).
+#
+# Self-contained example with no external credentials. Layer it on top of any
+# environment overlay (maps deep-merge, so multiple plugin overlays combine):
+#
+#   helm ... -f values/local.yaml -f values/plugins/local-ssh.yaml
+#
+# Only sets the plugin entry; daemon/verbosity come from the ccf-agent chart
+# defaults.
+
+ccf-agent:
+  config:
+    plugins:
+      local-ssh:
+        schedule: "*/10 * * * *"
+        source: ghcr.io/compliance-framework/plugin-local-ssh:v0.3.0
+        policies:
+          - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.3.1
+        labels:
+          group: local

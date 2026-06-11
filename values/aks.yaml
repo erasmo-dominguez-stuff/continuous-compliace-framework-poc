@@ -1,24 +1,20 @@
-# Test deployment of CCF on Azure Kubernetes Service (AKS).
+# AKS (Azure Kubernetes Service) test environment overlay.
 #
-# 1) Point kubectl at your AKS cluster:
-#      az aks get-credentials --resource-group <rg> --name <aks-name>
+# Environment config only; plugins live in values/plugins/ and are layered on
+# top (reusable across environments):
 #
-# 2) Deploy (uses the CURRENT kube-context, i.e. your AKS cluster):
-#      helm dependency build .
-#      helm upgrade --install ccf . -n ccf --create-namespace -f values-aks.yaml --wait --timeout 8m
-#      # or: make install-aks
+#   az aks get-credentials --resource-group <rg> --name <aks-name>
+#   helm dependency build .
+#   helm upgrade --install ccf . -n ccf --create-namespace \
+#     -f values/aks.yaml -f values/plugins/local-ssh.yaml --wait --timeout 8m
+#   # or: make install-aks
 #
-# 3) Access via port-forward (no public networking required):
-#      kubectl -n ccf port-forward svc/ccf-ui 8000:80
-#      kubectl -n ccf port-forward svc/ccf-api 8080:8080
-#      open http://localhost:8000
+# Access (no public networking required):
+#   kubectl -n ccf port-forward svc/ccf-ui 8000:80
+#   kubectl -n ccf port-forward svc/ccf-api 8080:8080
+#   open http://localhost:8000
 #
-# 4) Create a login user (no default credentials ship with CCF):
-#      kubectl -n ccf exec -it deploy/ccf-api -- /api users add \
-#        -e admin@ccf.local -f Admin -l User -p 'Admin12345!'
-#
-# For PUBLIC access without port-forward, see the LoadBalancer / ingress notes
-# at the bottom of this file.
+# For PUBLIC access, see the LoadBalancer / ingress notes at the bottom.
 
 ccf-app:
   enabled: true
@@ -89,19 +85,6 @@ ccf-agent:
     limits:
       cpu: 250m
       memory: 256Mi
-  # The agent panics with no plugins. A self-contained example is enabled so the
-  # full pipeline (agent -> API) works out of the box. Replace as needed.
-  config:
-    daemon: true
-    verbosity: 2
-    plugins:
-      local-ssh:
-        schedule: "*/10 * * * *"
-        source: ghcr.io/compliance-framework/plugin-local-ssh:v0.2.0
-        policies:
-          - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.2.0
-        labels:
-          group: aks-test
 
 # ---------------------------------------------------------------------------
 # Public access on AKS (optional, instead of port-forward)

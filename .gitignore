@@ -5,6 +5,7 @@
 charts/*.tgz
 charts/**/charts/*.tgz
 
-# Local overrides
+# Local overrides / secret-bearing value files (keep out of git)
 *.local.yaml
-values-*.local.yaml
+values/**/*.local.yaml
+values/**/*.secret.yaml

@@ -52,7 +52,8 @@ Both are driven by the `Makefile` (see [Local deployment](#local-deployment)).
 Full stack via the umbrella (one command):
 
 ```bash
-helm install ccf . --namespace ccf --create-namespace -f values-local.yaml
+helm install ccf . --namespace ccf --create-namespace \
+  -f values/local.yaml -f values/plugins/local-ssh.yaml
 ```
 
 Independently (recommended for production):
@@ -66,6 +67,28 @@ helm install ccf-agent charts/ccf-agent -n ccf \
 
 > Values are **top-level** in each subchart (e.g. `api.replicaCount`), and
 > **namespaced** in the umbrella (e.g. `ccf-app.api.replicaCount`).
+
+### Values layout
+
+`values.yaml` (umbrella defaults) stays at the chart root, as Helm requires.
+Everything else is organised under `values/` and **layered** — environment
+first, then one or more reusable plugin overlays:
+
+```
+values.yaml                  umbrella chart defaults (root)
+values/
+├── local.yaml               environment: kind / Docker Desktop
+├── aks.yaml                  environment: AKS test
+└── plugins/                  reusable plugin overlays (combine freely)
+    ├── local-ssh.yaml        local SSH hardening checks
+    └── github.yaml           GitHub repositories plugin
+charts/
+├── ccf-app/values-production.yaml    per-subchart production values
+└── ccf-agent/values-production.yaml
+```
+
+Because Helm deep-merges values files, you can stack any environment with any
+set of plugins, e.g. `-f values/aks.yaml -f values/plugins/github.yaml`.
 
 ## Local deployment
 
@@ -85,7 +108,7 @@ selected context, so you never deploy to the wrong cluster by accident.
 Requires `kind`, `kubectl`, `helm`:
 
 ```bash
-make up        # create cluster + helm install with values-local.yaml
+make up        # create cluster + install (values/local.yaml + local-ssh plugin)
 make pf        # port-forward UI (8000) and API (8080)
 ```
 
@@ -107,9 +130,9 @@ you get a clear error if Kubernetes is not enabled in Docker Desktop.
 ### After it's up (both options)
 
 Open http://localhost:8000. The UI talks to the API at `http://localhost:8080`
-(`ui.apiUrl` in `values-local.yaml`), matching the port-forward.
+(`ui.apiUrl` in `values/local.yaml`), matching the port-forward.
 
-`values-local.yaml` disables persistence and trims resources for laptops; it
+`values/local.yaml` disables persistence and trims resources for laptops; it
 works unchanged on both runtimes. Tear down with:
 
 ```bash
@@ -122,9 +145,10 @@ make down-docker  # docker: uninstall release (cluster keeps running)
 
 ## Test deployment on AKS (Azure)
 
-`values-aks.yaml` is tuned for a functional test on Azure Kubernetes Service:
+`values/aks.yaml` is tuned for a functional test on Azure Kubernetes Service:
 PostgreSQL persistence on the `managed-csi` StorageClass (with the `fsGroup`
-needed for Azure Disk), resource requests/limits, and the example agent plugin.
+needed for Azure Disk) and resource requests/limits. Plugins are layered from
+`values/plugins/` (the `local-ssh` overlay by default).
 
 ```bash
 az aks get-credentials --resource-group <rg> --name <aks-name>
@@ -140,19 +164,95 @@ CCF ships **no default user**; create one (see [Logging in](#logging-in)).
 
 For a public URL instead of port-forward, switch the UI/API Services to
 `LoadBalancer` or enable `ingress` — both are documented at the bottom of
-`values-aks.yaml`.
+`values/aks.yaml`.
 
 ## Logging in
 
-There are no default credentials. Create a user with the API's built-in CLI:
+There are **no default credentials**. The chart runs database migrations
+automatically (a `migrate` init container on the API; `api.migrations.enabled`),
+so you only need to create a user with the API's built-in CLI:
 
 ```bash
 kubectl -n ccf exec -it deploy/ccf-api -- /api users add \
   --email admin@ccf.local --first-name Admin --last-name User --password 'Admin12345!'
 ```
 
-Then log in to the UI with that email and password. If the command reports a
-missing table, run migrations first: `kubectl -n ccf exec -it deploy/ccf-api -- /api migrate up`.
+Then log in to the UI with that email and password.
+
+> If you disabled `api.migrations.enabled`, run migrations once before creating a
+> user: `kubectl -n ccf exec -it deploy/ccf-api -- /api migrate up`.
+
+## Plugins (agent)
+
+The agent runs compliance plugins on a schedule and reports to the API. The
+agent config is rendered into a **Secret** (it can carry plugin credentials).
+Plugins are reusable overlays in `values/plugins/`, layered on any environment.
+
+The `local-ssh` overlay (self-contained, no credentials) is applied by default.
+To add the **GitHub** plugin (`plugin-github-repositories` — repo settings,
+workflows, supply-chain facts), layer `values/plugins/github.yaml` and pass a
+read-only GitHub token at install time so it never lands in git:
+
+```bash
+export GITHUB_TOKEN=ghp_xxx   # read-only PAT (Actions, Administration, Contents,
+                              # Metadata, Pull requests, Secret scanning)
+
+# Via the Makefile (token/org injected only when provided):
+make up PLUGIN_VALUES="values/plugins/local-ssh.yaml values/plugins/github.yaml" \
+  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org>
+
+# Or with helm directly:
+helm upgrade --install ccf . -n ccf --create-namespace \
+  -f values/local.yaml -f values/plugins/github.yaml \
+  --set-string "ccf-agent.config.plugins.github_repos.config.token=$GITHUB_TOKEN" \
+  --set-string "ccf-agent.config.plugins.github_repos.config.organization=<your-org>"
+```
+
+Check it is scheduling/running:
+
+```bash
+kubectl -n ccf logs deploy/ccf-agent -f
+```
+
+Browse the full plugin catalogue (AWS, Azure, Kubernetes, Dependabot, GitHub
+settings, …) at https://github.com/orgs/compliance-framework/repositories?q=plugin-.
+Each plugin pairs with a `*-policies` bundle; set both `source` and `policies`
+and put plugin-specific settings under `config:` (see `values/plugins/github.yaml`).
+
+## Validate and test
+
+Everything is validatable both **offline** (no cluster) and **on a live
+cluster**, via `Makefile` targets:
+
+| Target           | Needs cluster | What it checks |
+|------------------|:-------------:|----------------|
+| `make validate`  | no            | `helm lint` + renders **every** environment × plugin overlay combination |
+| `make dry-run`   | yes           | Server-side dry-run (`helm upgrade --dry-run=server`) against the selected context |
+| `make test`      | yes           | `helm test` — in-cluster Pod that curls the API (`/api/auth/publickey`) and UI |
+| `make smoke`     | yes           | Waits for all rollouts (postgres/api/ui/agent), then runs `make test` |
+
+```bash
+# Offline: lint + render local & aks overlays with each plugin (incl. github)
+make validate
+
+# On the live cluster: wait for rollouts + connectivity test (with logs)
+make smoke
+```
+
+`make test` is a standard Helm test hook (`charts/ccf-app/templates/tests/`),
+gated by `ccf-app.tests.enabled`. The test Pod is kept after a successful run so
+`helm test --logs` can show `API OK` / `UI OK`; it's recreated on the next run.
+
+To validate the **login flow** end-to-end (automatic migrations + auth), after
+creating a user (see [Logging in](#logging-in)):
+
+```bash
+kubectl -n ccf port-forward svc/ccf-api 8080:8080 &
+curl -sS -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@ccf.local","password":"Admin12345!"}' -w '\nHTTP %{http_code}\n'
+# Expect HTTP 200 with a JWT in {"data":{"auth_token":"..."}}.
+```
 
 ## Quick local access (no ingress)
 
@@ -281,7 +381,7 @@ Critical items addressed by `values-production.yaml` (review every `CHANGE-ME`):
   matching `api.database.existingSecret`/`connection`.
 - **Agent plugins**: the agent **fails to start with no plugins configured**
   (`panic: no plugins specified in config`). Configure at least one plugin under
-  `ccf-agent.config.plugins` (see `values-local.yaml` for a working example),
+  `ccf-agent.config.plugins` (see `values/plugins/` for working overlays),
   or set `ccf-agent.enabled=false` if you only need the control plane.
 - **High availability**: API/UI run 2+ replicas with pod anti-affinity, HPA and
   PodDisruptionBudgets.

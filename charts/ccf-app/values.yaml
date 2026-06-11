@@ -84,6 +84,10 @@ api:
     pullPolicy: IfNotPresent
   environment: production
   allowedOrigins: ""
+  # Run `migrate up` as an init container so the DB schema exists before the API
+  # starts. Required for login to work; disable only if you migrate externally.
+  migrations:
+    enabled: true
   database:
     driver: postgres
     sslmode: disable
@@ -175,6 +179,13 @@ ui:
   affinity: {}
   podSecurityContext: {}
   securityContext: {}
+
+# ---------------------------------------------------------------------------
+# Helm tests (`helm test`) - in-cluster connectivity checks for API/UI.
+# ---------------------------------------------------------------------------
+tests:
+  enabled: true
+  image: curlimages/curl:8.11.1
 
 # ---------------------------------------------------------------------------
 # Ingress

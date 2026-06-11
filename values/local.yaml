@@ -1,7 +1,15 @@
-# Local / development values for the CCF umbrella chart (kind/minikube).
+# Local environment overlay (kind / Docker Desktop Kubernetes).
+#
+# Environment config only (resources, persistence, access). Plugins live in
+# values/plugins/ and are layered on top so they can be reused across
+# environments:
 #
 #   helm dependency build .
-#   helm install ccf . -n ccf --create-namespace -f values-local.yaml
+#   helm upgrade --install ccf . -n ccf --create-namespace \
+#     -f values/local.yaml -f values/plugins/local-ssh.yaml
+#   # or simply: make up
+#
+# Disables persistence and trims resources for laptops.
 
 ccf-app:
   enabled: true
@@ -41,17 +49,3 @@ ccf-agent:
     requests:
       cpu: 25m
       memory: 64Mi
-  # The agent panics on startup if no plugins are configured. A self-contained
-  # example (local SSH hardening checks) is enabled so `make up` yields a fully
-  # running stack out of the box. Replace with the plugins relevant to you.
-  config:
-    daemon: true
-    verbosity: 2
-    plugins:
-      local-ssh:
-        schedule: "*/10 * * * *"
-        source: ghcr.io/compliance-framework/plugin-local-ssh:v0.2.0
-        policies:
-          - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.2.0
-        labels:
-          group: local

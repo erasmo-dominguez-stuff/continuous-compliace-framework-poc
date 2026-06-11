@@ -1,0 +1,44 @@
+# Reusable plugin overlay: CCF GitHub plugin (plugin-github-repositories).
+#
+# Fetches repository metadata, settings, workflows and supply-chain facts for an
+# organization, then evaluates the bundled OPA/Rego policies against them.
+#
+# Requires a GitHub token (classic PAT or fine-grained) with READ-ONLY access to:
+#   Actions, Administration, Contents, Metadata, Pull requests, Secret scanning.
+#
+# Layer on top of any environment overlay. The token is passed at install time
+# via --set-string so it never lands in git; it ends up in the agent's Secret
+# (config.yml), not in a ConfigMap:
+#
+#   helm dependency build .
+#   helm upgrade --install ccf . -n ccf --create-namespace \
+#     -f values/local.yaml -f values/plugins/github.yaml \
+#     --set-string 'ccf-agent.config.plugins.github_repos.config.token='"$GITHUB_TOKEN" \
+#     --set-string 'ccf-agent.config.plugins.github_repos.config.organization=<your-org>'
+#
+#   # or, via the Makefile:
+#   make up PLUGIN_VALUES=values/plugins/github.yaml \
+#     GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org>
+#
+# (Swap values/local.yaml for values/aks.yaml when targeting AKS.)
+
+ccf-agent:
+  config:
+    plugins:
+      github_repos:
+        # Cron schedule (minute hour day month weekday).
+        schedule: "*/30 * * * *"
+        source: ghcr.io/compliance-framework/plugin-github-repositories:v0.8.1
+        policies:
+          - ghcr.io/compliance-framework/plugin-github-repositories-policies:v0.7.0
+        labels:
+          provider: github
+        config:
+          # Set these via --set-string at install time (see header). Leaving the
+          # token here empty keeps it out of git; the real value is injected into
+          # the agent Secret on install.
+          organization: ""
+          token: ""
+          # Optional scoping (mutually exclusive):
+          # included_repositories: "repo-a,repo-b"
+          # excluded_repositories: "repo-c"

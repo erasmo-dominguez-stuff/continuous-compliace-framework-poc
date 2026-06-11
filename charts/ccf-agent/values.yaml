@@ -9,7 +9,7 @@ replicaCount: 1
 
 image:
   repository: ghcr.io/compliance-framework/agent
-  tag: "0.2.1"
+  tag: "0.7.1"
   pullPolicy: IfNotPresent
 
 serviceAccount:
@@ -34,9 +34,8 @@ args:
 
 # -- Agent configuration rendered to /etc/ccf/config.yml.
 # api.url is injected from .Values.apiUrl when left empty here.
-# NOTE: the agent panics on startup if `plugins` is empty
-# ("no plugins specified in config"). Configure at least one plugin below
-# (see values-local.yaml for a working example) or disable the agent.
+# Configure plugins below, or layer a reusable overlay from values/plugins/
+# (e.g. values/plugins/local-ssh.yaml, values/plugins/github.yaml).
 config:
   daemon: true
   verbosity: 2
@@ -49,6 +48,21 @@ config:
     #     - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.2.0
     #   labels:
     #     group: public
+
+# -- Extra environment variables for the agent container (list form).
+# Only api.auth.client_id/client_secret are reliably overridable via env
+# (CCF_API_AUTH_CLIENT_ID / CCF_API_AUTH_CLIENT_SECRET).
+extraEnv: []
+  # - name: CCF_API_AUTH_CLIENT_SECRET
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: ccf-agent-auth
+  #       key: client_secret
+
+# -- Extra envFrom sources (ConfigMap/Secret refs) for the agent container.
+extraEnvFrom: []
+  # - secretRef:
+  #     name: ccf-agent-extra-env
 
 podAnnotations: {}
 
