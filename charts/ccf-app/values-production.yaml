@@ -1,0 +1,122 @@
+# Production values for ccf-app. Review every CHANGE-ME before use.
+#
+#   helm upgrade --install ccf-app . -n ccf --create-namespace -f values-production.yaml
+
+imagePullSecrets: []
+
+postgres:
+  enabled: true
+  auth:
+    # CHANGE-ME: provide credentials via an existing Secret with keys
+    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB.
+    existingSecret: "ccf-postgres-credentials"
+    username: postgres
+    database: ccf
+  persistence:
+    enabled: true
+    storageClass: ""        # CHANGE-ME: backed-up StorageClass
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podSecurityContext:
+    fsGroup: 999
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+api:
+  replicaCount: 2
+  environment: production
+  database:
+    sslmode: require
+    # API takes a single connection string; supply it via a Secret in sync with
+    # ccf-postgres-credentials.
+    existingSecret: "ccf-db-connection"
+  jwtSecret: ""             # CHANGE-ME via a sealed/secret values file
+  metrics:
+    enabled: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    enabled: true
+    minAvailable: 1
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+
+ui:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+  pdb:
+    enabled: true
+    minAvailable: 1
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: ui
+
+ingress:
+  enabled: true
+  className: nginx          # CHANGE-ME
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod   # CHANGE-ME / remove if unused
+  uiHost: ccf.example.com           # CHANGE-ME
+  apiHost: api.ccf.example.com      # CHANGE-ME
+  tls:
+    - hosts:
+        - ccf.example.com           # CHANGE-ME
+        - api.ccf.example.com       # CHANGE-ME
+      secretName: ccf-tls
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx          # CHANGE-ME
+  monitoringNamespaceSelector:
+    kubernetes.io/metadata.name: observability

@@ -1,0 +1,10 @@
+*.tmpl
+.DS_Store
+.git/
+.gitignore
+.vscode/
+.idea/
+*.bak
+*.tgz
+ci/
+values-production.yaml

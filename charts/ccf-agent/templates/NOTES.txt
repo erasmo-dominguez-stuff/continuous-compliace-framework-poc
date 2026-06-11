@@ -1,0 +1,9 @@
+CCF Agent "{{ include "ccf-agent.fullname" . }}" deployed in namespace {{ .Release.Namespace }}.
+
+Reporting to API: {{ include "ccf-agent.apiUrl" . }}
+
+Check it is running:
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/name={{ include "ccf-agent.name" . }}
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/name={{ include "ccf-agent.name" . }}
+
+Configure plugins/policies under `config.plugins` in your values.

@@ -1,0 +1,43 @@
+# Local / development values for the CCF umbrella chart (kind/minikube).
+#
+#   helm dependency build .
+#   helm install ccf . -n ccf --create-namespace -f values-local.yaml
+
+ccf-app:
+  enabled: true
+  fullnameOverride: ccf
+  postgres:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  api:
+    environment: local
+    allowedOrigins: "http://localhost:8000,http://localhost:3000"
+    metrics:
+      enabled: true
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+  ui:
+    apiUrl: "http://localhost:8080"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+  ingress:
+    enabled: false
+  networkPolicy:
+    enabled: false
+
+ccf-agent:
+  enabled: true
+  fullnameOverride: ccf-agent
+  apiUrl: "http://ccf-api:8080"
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi

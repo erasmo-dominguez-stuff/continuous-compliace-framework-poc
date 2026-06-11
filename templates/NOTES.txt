@@ -1,0 +1,16 @@
+CCF umbrella release "{{ .Release.Name }}" deployed in namespace {{ .Release.Namespace }}.
+
+Subcharts:
+{{- if (index .Values "ccf-app" "enabled") }}
+  - ccf-app   (PostgreSQL + API + UI)
+{{- end }}
+{{- if (index .Values "ccf-agent" "enabled") }}
+  - ccf-agent (compliance agent)
+{{- end }}
+
+Local access (no ingress):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/ccf-ui 8000:80
+  kubectl -n {{ .Release.Namespace }} port-forward svc/ccf-api 8080:8080
+  open http://localhost:8000
+
+For independent lifecycles, deploy charts/ccf-app and charts/ccf-agent directly.

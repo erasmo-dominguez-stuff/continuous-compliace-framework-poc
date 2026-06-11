@@ -1,0 +1,147 @@
+# Values for the grafana/alloy Helm chart, configured to collect logs and
+# metrics from CCF workloads (pods labelled app.kubernetes.io/part-of=ccf).
+#
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install ccf-alloy grafana/alloy \
+#     -n observability --create-namespace -f observability/alloy-values.yaml
+#
+# Change the Loki and Prometheus endpoints below to match your backends.
+# Defaults assume the local stack created by `make obs-stack`.
+
+# Single replica Deployment: log/metric collection happens via the Kubernetes
+# API, so a DaemonSet would create duplicate series/log lines.
+controller:
+  type: deployment
+  replicas: 1
+
+# Alloy needs cluster read access to discover pods and stream their logs.
+rbac:
+  create: true
+
+alloy:
+  configMap:
+    create: true
+    content: |-
+      // =====================================================================
+      // Discovery: only CCF pods
+      // =====================================================================
+      discovery.kubernetes "ccf_pods" {
+        role = "pod"
+        selectors {
+          role  = "pod"
+          label = "app.kubernetes.io/part-of=ccf"
+        }
+      }
+
+      // =====================================================================
+      // LOGS  ->  Loki
+      // =====================================================================
+      discovery.relabel "ccf_logs" {
+        targets = discovery.kubernetes.ccf_pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_instance"]
+          target_label  = "instance"
+        }
+        rule {
+          replacement  = "ccf"
+          target_label = "app"
+        }
+      }
+
+      loki.source.kubernetes "ccf" {
+        targets    = discovery.relabel.ccf_logs.output
+        forward_to = [loki.process.ccf.receiver]
+      }
+
+      loki.process "ccf" {
+        forward_to = [loki.write.default.receiver]
+        // Add the cluster job label expected by Loki/Grafana dashboards.
+        stage.static_labels {
+          values = {
+            job = "ccf",
+          }
+        }
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+      // =====================================================================
+      // METRICS  ->  Prometheus (remote_write)
+      // =====================================================================
+      discovery.relabel "ccf_metrics" {
+        targets = discovery.kubernetes.ccf_pods.targets
+
+        // Only scrape pods annotated prometheus.io/scrape: "true"
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          regex         = "true"
+          action        = "keep"
+        }
+        // Use the annotated port: pod_ip:port
+        rule {
+          source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          regex         = "([^:]+)(?::\\d+)?;(\\d+)"
+          replacement   = "$1:$2"
+          target_label  = "__address__"
+        }
+        // Custom metrics path if annotated.
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+          regex         = "(.+)"
+          target_label  = "__metrics_path__"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+      }
+
+      prometheus.scrape "ccf" {
+        targets         = discovery.relabel.ccf_metrics.output
+        forward_to      = [prometheus.remote_write.default.receiver]
+        scrape_interval = "30s"
+        job_name        = "ccf"
+      }
+
+      prometheus.remote_write "default" {
+        endpoint {
+          url = "http://prometheus-server.observability.svc.cluster.local/api/v1/write"
+        }
+      }
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

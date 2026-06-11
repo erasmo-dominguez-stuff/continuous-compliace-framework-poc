@@ -1,0 +1,11 @@
+{{- $apiUrl := include "ccf-agent.apiUrl" . -}}
+{{- $config := mergeOverwrite (deepCopy .Values.config) (dict "api" (dict "url" $apiUrl)) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ccf-agent.fullname" . }}
+  labels:
+    {{- include "ccf-agent.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    {{- toYaml $config | nindent 4 }}

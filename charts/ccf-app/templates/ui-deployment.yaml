@@ -1,0 +1,70 @@
+{{- if .Values.ui.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ccf.ui.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ccf.selectorLabels" (dict "ctx" . "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ccf.componentLabels" (dict "ctx" . "component" "ui") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ui-configmap.yaml") . | sha256sum }}
+        {{- with .Values.ui.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ccf.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml (default .Values.podSecurityContext .Values.ui.podSecurityContext) | nindent 8 }}
+      containers:
+        - name: ui
+          image: "{{ .Values.ui.image.repository }}:{{ .Values.ui.image.tag }}"
+          imagePullPolicy: {{ .Values.ui.image.pullPolicy }}
+          securityContext:
+            {{- toYaml (default .Values.securityContext .Values.ui.securityContext) | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.containerPort }}
+              protocol: TCP
+          {{- with .Values.ui.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.ui.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.json
+              subPath: config.json
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "ccf.ui.fullname" . }}
+      {{- with (default .Values.nodeSelector .Values.ui.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (default .Values.affinity .Values.ui.affinity) }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (default .Values.tolerations .Values.ui.tolerations) }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

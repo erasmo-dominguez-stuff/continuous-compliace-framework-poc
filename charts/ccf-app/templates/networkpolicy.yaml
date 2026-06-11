@@ -1,0 +1,95 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- if .Values.postgres.enabled }}
+# PostgreSQL: only the API may connect on 5432.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ccf.postgres.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "postgres") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ccf.selectorLabels" (dict "ctx" . "component" "postgres") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "ccf.selectorLabels" (dict "ctx" . "component" "api") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}
+{{- if .Values.api.enabled }}
+---
+# API: ingress from UI, ingress controller and monitoring; metrics from monitoring.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ccf.api.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ccf.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "ccf.selectorLabels" (dict "ctx" . "component" "ui") | nindent 14 }}
+        # Any CCF component (e.g. the ccf-agent chart) in this namespace.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: ccf
+              app.kubernetes.io/component: agent
+        {{- with .Values.networkPolicy.extraApiIngressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.networkPolicy.ingressNamespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.containerPort }}
+    {{- if and .Values.api.metrics.enabled .Values.networkPolicy.monitoringNamespaceSelector }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.monitoringNamespaceSelector | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.api.metrics.port }}
+    {{- end }}
+{{- end }}
+{{- if .Values.ui.enabled }}
+---
+# UI: ingress from the ingress controller (or anywhere if not set).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "ccf.ui.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "ccf.selectorLabels" (dict "ctx" . "component" "ui") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - {{ if .Values.networkPolicy.ingressNamespace }}from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+      {{ end }}ports:
+        - protocol: TCP
+          port: {{ .Values.ui.containerPort }}
+{{- end }}
+{{- end }}

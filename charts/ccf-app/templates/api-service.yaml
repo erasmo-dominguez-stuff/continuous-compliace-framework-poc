@@ -1,0 +1,23 @@
+{{- if .Values.api.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ccf.api.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  type: {{ .Values.api.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+    {{- if and .Values.api.metrics.enabled .Values.api.metrics.service }}
+    - name: metrics
+      port: {{ .Values.api.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "ccf.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+{{- end }}

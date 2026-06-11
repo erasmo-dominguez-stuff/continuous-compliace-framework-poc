@@ -1,0 +1,184 @@
+# Default values for ccf-app (PostgreSQL + API + UI).
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Fully override the generated resource name prefix.
+fullnameOverride: ""
+
+# -- Extra labels merged into every rendered object.
+commonLabels: {}
+
+# -- Secrets used to pull images from private registries, e.g. [{name: regcred}]
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+# Pod/container security defaults applied to every component unless overridden.
+podSecurityContext: {}
+securityContext: {}
+
+# Scheduling defaults applied to every component unless overridden per component.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Cluster-wide hardening
+# ---------------------------------------------------------------------------
+networkPolicy:
+  # -- Create NetworkPolicies for the components.
+  enabled: false
+  # -- Namespace where the ingress controller runs.
+  ingressNamespace: ""
+  # -- namespaceSelector matchLabels allowed to scrape API metrics (e.g. Alloy).
+  monitoringNamespaceSelector: {}
+    # kubernetes.io/metadata.name: observability
+  # -- Extra `from` peers allowed to reach the API (raw NetworkPolicyPeer list).
+  extraApiIngressFrom: []
+
+# ---------------------------------------------------------------------------
+# PostgreSQL datastore
+# ---------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: ghcr.io/compliance-framework/pg-ccf
+    tag: "0.0.5"
+    pullPolicy: IfNotPresent
+  auth:
+    username: postgres
+    # -- Database password. Change for any non-local deployment.
+    password: postgres
+    database: ccf
+    # -- Existing Secret with keys POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB.
+    existingSecret: ""
+  service:
+    type: ClusterIP
+    port: 5432
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 8Gi
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+# ---------------------------------------------------------------------------
+# API (central reporting service)
+# ---------------------------------------------------------------------------
+api:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/compliance-framework/api
+    tag: ""  # defaults to .Chart.AppVersion when empty
+    pullPolicy: IfNotPresent
+  environment: production
+  allowedOrigins: ""
+  database:
+    driver: postgres
+    sslmode: disable
+    host: ""
+    connection: ""
+    # -- Existing Secret holding key CCF_DB_CONNECTION (required when
+    # postgres.auth.existingSecret is set, unless `connection` is provided).
+    existingSecret: ""
+  jwtSecret: ""
+  extraEnv: {}
+  service:
+    type: ClusterIP
+    port: 8080
+  containerPort: 8080
+  metrics:
+    enabled: true
+    port: 9090
+    path: /metrics
+    service: true
+  podAnnotations: {}
+  pdb:
+    enabled: false
+    minAvailable: 1
+  dataVolume:
+    enabled: true
+    size: 1Gi
+  livenessProbe:
+    httpGet:
+      path: /api/auth/publickey
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readinessProbe:
+    httpGet:
+      path: /api/auth/publickey
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  resources: {}
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 80
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+# ---------------------------------------------------------------------------
+# UI (web frontend)
+# ---------------------------------------------------------------------------
+ui:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/compliance-framework/ui
+    tag: "2.6.1"
+    pullPolicy: IfNotPresent
+  apiUrl: ""
+  service:
+    type: ClusterIP
+    port: 80
+  containerPort: 80
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 20
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  podAnnotations: {}
+  pdb:
+    enabled: false
+    minAvailable: 1
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+# ---------------------------------------------------------------------------
+# Ingress
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls: []
+  uiHost: ""
+  apiHost: ""

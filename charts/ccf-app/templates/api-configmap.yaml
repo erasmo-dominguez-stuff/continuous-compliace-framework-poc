@@ -1,0 +1,21 @@
+{{- if .Values.api.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ccf.api.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+data:
+  APP_PORT: {{ .Values.api.containerPort | quote }}
+  CCF_ENVIRONMENT: {{ .Values.api.environment | quote }}
+  CCF_DB_DRIVER: {{ .Values.api.database.driver | quote }}
+  CCF_DB_DEBUG: "0"
+  CCF_API_ALLOWED_ORIGINS: {{ include "ccf.api.allowedOrigins" . | quote }}
+  CCF_METRICS_ENABLED: {{ .Values.api.metrics.enabled | quote }}
+  {{- if .Values.api.metrics.enabled }}
+  CCF_METRICS_PORT: {{ printf ":%v" .Values.api.metrics.port | quote }}
+  {{- end }}
+  {{- range $key, $value := .Values.api.extraEnv }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "ccf.fullname" . }}
+  labels:
+    {{- include "ccf.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if and .Values.ui.enabled .Values.ingress.uiHost }}
+    - host: {{ .Values.ingress.uiHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ccf.ui.fullname" . }}
+                port:
+                  number: {{ .Values.ui.service.port }}
+    {{- end }}
+    {{- if and .Values.api.enabled .Values.ingress.apiHost }}
+    - host: {{ .Values.ingress.apiHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "ccf.api.fullname" . }}
+                port:
+                  number: {{ .Values.api.service.port }}
+    {{- end }}
+{{- end }}

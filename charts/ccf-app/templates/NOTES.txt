@@ -1,0 +1,39 @@
+Continuous Compliance Framework (CCF) has been deployed.
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Components:
+{{- if .Values.postgres.enabled }}
+  - PostgreSQL : {{ include "ccf.postgres.fullname" . }} (port {{ .Values.postgres.service.port }})
+{{- end }}
+{{- if .Values.api.enabled }}
+  - API        : {{ include "ccf.api.fullname" . }} (port {{ .Values.api.service.port }})
+{{- end }}
+{{- if .Values.ui.enabled }}
+  - UI         : {{ include "ccf.ui.fullname" . }} (port {{ .Values.ui.service.port }})
+{{- end }}
+
+The agent is packaged separately (chart: ccf-agent). Point it at:
+  {{ include "ccf.api.serviceUrl" . }}
+
+{{ if .Values.ingress.enabled -}}
+Access via ingress:
+{{- if .Values.ingress.uiHost }}
+  UI : http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.uiHost }}
+{{- end }}
+{{- if .Values.ingress.apiHost }}
+  API: http{{ if .Values.ingress.tls }}s{{ end }}://{{ .Values.ingress.apiHost }}
+{{- end }}
+{{- else -}}
+Ingress is disabled. To try CCF locally, port-forward the services:
+
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "ccf.ui.fullname" . }} 8000:{{ .Values.ui.service.port }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "ccf.api.fullname" . }} 8080:{{ .Values.api.service.port }}
+
+Then open the UI at http://localhost:8000 (it expects the API at {{ include "ccf.ui.apiUrl" . }}).
+{{- end }}
+
+WARNING: The default PostgreSQL credentials are for local use only.
+Override postgres.auth.password (or use postgres.auth.existingSecret) for any
+real deployment.

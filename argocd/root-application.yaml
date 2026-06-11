@@ -1,0 +1,31 @@
+# App-of-apps: bootstrap everything by applying ONLY this file:
+#   kubectl apply -n argocd -f ccf/argocd/root-application.yaml
+#
+# It deploys the AppProject and the CCF + Alloy Applications from this folder.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ccf-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/erasmo-dominguez-stuff/2026.git
+    # CHANGE-ME: branch/tag to track.
+    targetRevision: main
+    path: ccf/argocd
+    directory:
+      recurse: false
+      # Exclude self so the root app doesn't manage itself.
+      exclude: "root-application.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,30 @@
+apiVersion: v2
+name: ccf
+description: |
+  Umbrella chart that deploys the full Continuous Compliance Framework (CCF)
+  solution by composing the ccf-app (PostgreSQL + API + UI) and ccf-agent
+  charts. Use it for a single-command install; for independent lifecycles deploy
+  the subcharts directly. See https://continuouscompliance.io/
+type: application
+version: 0.1.0
+appVersion: "0.11.0"
+keywords:
+  - compliance
+  - oscal
+  - security
+  - governance
+  - ccf
+home: https://continuouscompliance.io/
+sources:
+  - https://github.com/compliance-framework
+dependencies:
+  - name: ccf-app
+    version: "0.1.0"
+    repository: "file://charts/ccf-app"
+    condition: ccf-app.enabled
+  - name: ccf-agent
+    version: "0.1.0"
+    repository: "file://charts/ccf-agent"
+    condition: ccf-agent.enabled
+maintainers:
+  - name: CCF deployment chart

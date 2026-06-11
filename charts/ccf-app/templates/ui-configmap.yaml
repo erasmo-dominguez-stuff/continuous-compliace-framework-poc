@@ -1,0 +1,13 @@
+{{- if .Values.ui.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ccf.ui.fullname" . }}
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "ui") | nindent 4 }}
+data:
+  config.json: |
+    {
+      "API_URL": "{{ include "ccf.ui.apiUrl" . }}"
+    }
+{{- end }}

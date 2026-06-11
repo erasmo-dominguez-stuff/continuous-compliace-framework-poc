@@ -1,0 +1,58 @@
+# Default values for ccf-agent.
+
+nameOverride: ""
+fullnameOverride: ""
+commonLabels: {}
+imagePullSecrets: []
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/compliance-framework/agent
+  tag: "0.2.1"
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+# -- URL of the CCF API the agent reports to. Defaults to the in-cluster
+# ccf-app API Service name. Override when the API lives elsewhere.
+apiUrl: "http://ccf-api:8080"
+
+# -- Command/args for the agent container. Config is mounted at /etc/ccf/config.yml.
+command: []
+args:
+  - agent
+  - -c
+  - /etc/ccf/config.yml
+
+# -- Agent configuration rendered to /etc/ccf/config.yml.
+# api.url is injected from .Values.apiUrl when left empty here.
+config:
+  daemon: true
+  verbosity: 2
+  api:
+    url: ""
+  plugins: {}
+    # ssh:
+    #   source: ghcr.io/compliance-framework/plugin-local-ssh:v0.2.0
+    #   policies:
+    #     - ghcr.io/compliance-framework/plugin-local-ssh-policies:v0.2.0
+    #   labels:
+    #     group: public
+
+podAnnotations: {}
+
+pdb:
+  enabled: false
+  minAvailable: 1
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podSecurityContext: {}
+securityContext: {}

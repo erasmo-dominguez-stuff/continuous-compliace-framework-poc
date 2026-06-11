@@ -1,0 +1,21 @@
+apiVersion: v2
+name: ccf-app
+description: |
+  Continuous Compliance Framework control plane: PostgreSQL datastore, central
+  API and web UI. The compliance Agent is packaged separately (ccf-agent).
+  See https://continuouscompliance.io/
+type: application
+version: 0.1.0
+appVersion: "0.11.0"
+keywords:
+  - compliance
+  - oscal
+  - security
+  - governance
+  - ccf
+home: https://continuouscompliance.io/
+sources:
+  - https://github.com/compliance-framework/api
+  - https://github.com/compliance-framework/ui
+maintainers:
+  - name: CCF deployment chart
