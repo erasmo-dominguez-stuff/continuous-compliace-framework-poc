@@ -120,6 +120,40 @@ make down-docker  # docker: uninstall release (cluster keeps running)
 > The bundled `helm dependency build` step (subchart vendoring) runs
 > automatically before every install via the `deps` target.
 
+## Test deployment on AKS (Azure)
+
+`values-aks.yaml` is tuned for a functional test on Azure Kubernetes Service:
+PostgreSQL persistence on the `managed-csi` StorageClass (with the `fsGroup`
+needed for Azure Disk), resource requests/limits, and the example agent plugin.
+
+```bash
+az aks get-credentials --resource-group <rg> --name <aks-name>
+make install-aks    # installs on the CURRENT kube-context (your AKS cluster)
+
+# Access via port-forward (no public networking required):
+kubectl -n ccf port-forward svc/ccf-ui 8000:80
+kubectl -n ccf port-forward svc/ccf-api 8080:8080
+# open http://localhost:8000
+```
+
+CCF ships **no default user**; create one (see [Logging in](#logging-in)).
+
+For a public URL instead of port-forward, switch the UI/API Services to
+`LoadBalancer` or enable `ingress` — both are documented at the bottom of
+`values-aks.yaml`.
+
+## Logging in
+
+There are no default credentials. Create a user with the API's built-in CLI:
+
+```bash
+kubectl -n ccf exec -it deploy/ccf-api -- /api users add \
+  --email admin@ccf.local --first-name Admin --last-name User --password 'Admin12345!'
+```
+
+Then log in to the UI with that email and password. If the command reports a
+missing table, run migrations first: `kubectl -n ccf exec -it deploy/ccf-api -- /api migrate up`.
+
 ## Quick local access (no ingress)
 
 ```bash

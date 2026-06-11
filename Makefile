@@ -150,6 +150,12 @@ install-local: deps ## Install/upgrade the full stack (umbrella) with local valu
 		--namespace $(NAMESPACE) --create-namespace \
 		-f values-local.yaml --wait --timeout 5m
 
+.PHONY: install-aks
+install-aks: deps ## Install CCF on the CURRENT kube-context (e.g. AKS) with values-aks.yaml
+	helm upgrade --install $(RELEASE) $(CHART_DIR) \
+		--namespace $(NAMESPACE) --create-namespace \
+		-f values-aks.yaml --wait --timeout 8m
+
 .PHONY: install-app
 install-app: deps ## Install ccf-app standalone (production values)
 	helm upgrade --install ccf-app $(CHART_DIR)/charts/ccf-app $(HELM_CTX) \
