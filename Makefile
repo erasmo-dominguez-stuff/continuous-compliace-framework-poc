@@ -63,6 +63,42 @@ ifneq ($(strip $(GITHUB_ORG)),)
 GH_ARGS += --set-string ccf-agent.config.plugins.github_repos.config.organization=$(GITHUB_ORG)
 endif
 
+# Extra free-form overlays layered last (e.g. HA / official-Postgres overlays):
+#   make install-aks EXTRA_VALUES="values/postgres-ha.yaml" PG_PASSWORD=...
+EXTRA_VALUES ?=
+EXTRA_ARGS   := $(foreach f,$(EXTRA_VALUES),-f $(f))
+
+# Optional PostgreSQL password for the official (Bitnami) chart overlay,
+# injected only when provided so it never lands in git. It is set both on the
+# Bitnami subchart and on the connection builder the API uses.
+PG_ARGS :=
+ifneq ($(strip $(PG_PASSWORD)),)
+PG_ARGS += --set-string postgresql.auth.password=$(PG_PASSWORD)
+PG_ARGS += --set-string ccf-app.postgres.auth.password=$(PG_PASSWORD)
+endif
+
+# Optional default admin user for the UI. When ADMIN_PASSWORD is provided the
+# bootstrap is enabled and the password injected at install time (out of git):
+#   make install-aks ADMIN_PASSWORD='<strong-pw>'
+# (the local overlay already enables a default admin; pass ADMIN_PASSWORD to
+# override its password).
+ADMIN_ARGS :=
+ifneq ($(strip $(ADMIN_PASSWORD)),)
+ADMIN_ARGS += --set ccf-app.api.adminUser.enabled=true
+ADMIN_ARGS += --set-string ccf-app.api.adminUser.password=$(ADMIN_PASSWORD)
+endif
+
+# Combined extra install args (free-form overlays + injected secrets).
+INSTALL_EXTRA := $(EXTRA_ARGS) $(PG_ARGS) $(ADMIN_ARGS)
+
+# ---------------------------------------------------------------- policies (OPA)
+# Custom Rego policies live in policies/. Test with opa, bundle with opa, and
+# push the bundle to an OCI registry with gooci (same toolchain as upstream).
+POLICY_DIR    ?= policies
+POLICY_BUNDLE ?= dist/policies-bundle.tar.gz
+POLICY_IMAGE  ?= ghcr.io/your-org/ccf-custom-policies:v0.1.0
+GOOCI_VERSION ?= v0.0.7
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
@@ -179,6 +215,10 @@ template-all: deps ## Render every environment x plugin overlay combination (no 
 				--set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
 				--set-string ccf-agent.config.plugins.github_repos.config.organization=dummy >/dev/null; \
 		done; \
+		echo "--- $$env + values/postgres-ha.yaml (official HA Postgres) ---"; \
+		helm template $(RELEASE) $(CHART_DIR) -f $$env -f values/postgres-ha.yaml \
+			--set-string postgresql.auth.password=dummy \
+			--set-string ccf-app.postgres.auth.password=dummy >/dev/null; \
 	done; \
 	echo "all combinations rendered successfully"
 
@@ -186,7 +226,7 @@ template-all: deps ## Render every environment x plugin overlay combination (no 
 dry-run: deps ## Server-side dry-run against the selected cluster (validates vs the API server)
 	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) --dry-run=server
+		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) $(INSTALL_EXTRA) --dry-run=server
 
 .PHONY: smoke
 smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
@@ -200,21 +240,44 @@ smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
 test: ## Run helm test hooks (in-cluster API/UI connectivity)
 	helm test $(RELEASE) -n $(NAMESPACE) $(HELM_CTX) --logs
 
+## ---------------------------------------------------------------- custom policies
+.PHONY: policy-validate
+policy-validate: ## opa check: compile/type-check custom Rego policies
+	opa check $(POLICY_DIR)
+
+.PHONY: policy-test
+policy-test: ## opa test: run custom policy unit tests
+	opa test $(POLICY_DIR) -v
+
+.PHONY: policy-build
+policy-build: policy-validate ## Build the custom policy OCI bundle (dist/policies-bundle.tar.gz)
+	@mkdir -p $(dir $(POLICY_BUNDLE))
+	opa build -b $(POLICY_DIR) -o $(POLICY_BUNDLE)
+	@echo "built $(POLICY_BUNDLE)"
+
+.PHONY: policy-push
+policy-push: policy-build ## Push the policy bundle to an OCI registry (POLICY_IMAGE, GHCR_USER, GHCR_TOKEN)
+	@command -v gooci >/dev/null 2>&1 || { echo "installing gooci $(GOOCI_VERSION)..."; go install github.com/compliance-framework/gooci@$(GOOCI_VERSION); }
+	@test -n "$(GHCR_TOKEN)" || { echo "GHCR_TOKEN is required (read/write packages token)"; exit 1; }
+	gooci login ghcr.io --username $(GHCR_USER) --password $(GHCR_TOKEN)
+	gooci upload-single $(POLICY_BUNDLE) $(POLICY_IMAGE)
+	@echo "pushed $(POLICY_IMAGE)"
+
 .PHONY: template-local
 template-local: deps ## Render umbrella manifests with local + plugin overlays
-	helm template $(RELEASE) $(CHART_DIR) -f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS)
+	helm template $(RELEASE) $(CHART_DIR) -f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) $(INSTALL_EXTRA)
 
 .PHONY: install-local
 install-local: deps ## Install/upgrade the full stack with local + plugin overlays
 	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) --wait --timeout 5m
+		-f $(ENV_LOCAL) $(PLUGIN_ARGS) $(GH_ARGS) $(INSTALL_EXTRA) --wait --timeout 5m
 
 .PHONY: install-aks
 install-aks: deps ## Install on the CURRENT kube-context (e.g. AKS) with aks + plugin overlays
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f $(ENV_AKS) $(PLUGIN_ARGS) $(GH_ARGS) --wait --timeout 8m
+		-f $(ENV_AKS) $(PLUGIN_ARGS) $(GH_ARGS) $(INSTALL_EXTRA) --wait --timeout 8m
 
 .PHONY: install-app
 install-app: deps ## Install ccf-app standalone (production values)

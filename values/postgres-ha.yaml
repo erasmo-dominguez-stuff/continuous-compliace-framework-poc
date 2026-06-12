@@ -1,0 +1,125 @@
+# Reliability / fault-tolerance overlay.
+#
+# Replaces the lightweight built-in PostgreSQL StatefulSet with the official
+# Bitnami PostgreSQL chart in HIGH-AVAILABILITY mode (one primary + streaming
+# read replicas, PDBs, metrics), and runs the API/UI with 2 replicas, PDBs and
+# pod anti-affinity so a single node/pod failure never takes CCF down.
+#
+# The DB password is NOT stored here; inject it at install time so it stays out
+# of git. The Makefile wires it to both the Bitnami chart and the API DSN:
+#
+#   helm dependency build .
+#   make install-aks EXTRA_VALUES="values/postgres-ha.yaml" PG_PASSWORD='<strong-pw>'
+#   # layer plugins as usual, e.g. PLUGIN_VALUES="values/plugins/local-ssh.yaml"
+#
+#   # or with helm directly (note: password set in TWO places):
+#   helm upgrade --install ccf . -n ccf --create-namespace \
+#     -f values/aks.yaml -f values/postgres-ha.yaml \
+#     --set-string postgresql.auth.password='<strong-pw>' \
+#     --set-string ccf-app.postgres.auth.password='<strong-pw>'
+#
+# NOTE on images: Bitnami moved many image tags behind "Bitnami Secure Images"
+# in 2025. If the default image fails to pull, override the registry/repo, e.g.
+#   --set global.security.allowInsecureImages=true \
+#   --set image.repository=bitnamilegacy/postgresql
+# or mirror the image into your own registry.
+
+# --------------------------------------------------------------------------
+# Official Bitnami PostgreSQL (umbrella-level dependency: postgresql.enabled)
+# --------------------------------------------------------------------------
+postgresql:
+  enabled: true
+  # primary + read replica(s) with streaming replication.
+  architecture: replication
+  auth:
+    username: ccf
+    database: ccf
+    # password: injected via --set-string (see header) — never commit it.
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+      # storageClass: managed-csi   # set for AKS; empty = cluster default
+    pdb:
+      create: true
+      minAvailable: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  readReplicas:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 8Gi
+    pdb:
+      create: true
+      minAvailable: 0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  metrics:
+    enabled: true
+
+# --------------------------------------------------------------------------
+# CCF control plane: disable built-in Postgres, point the API at the Bitnami
+# primary, and run API/UI fault-tolerant.
+# --------------------------------------------------------------------------
+ccf-app:
+  postgres:
+    # Turn off the bundled StatefulSet; Bitnami provides PostgreSQL now.
+    enabled: false
+    # These are NOT used to deploy anything here — they only feed the API's
+    # connection-string builder (host comes from api.database.host below).
+    # The password is injected to ccf-app.postgres.auth.password via --set-string.
+    auth:
+      username: ccf
+      database: ccf
+
+  api:
+    replicaCount: 2
+    database:
+      # Bitnami replication exposes the writable primary on "<release>-postgresql-primary".
+      host: ccf-postgresql-primary
+      sslmode: disable
+    pdb:
+      enabled: true
+      minAvailable: 1
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: api
+
+  ui:
+    replicaCount: 2
+    pdb:
+      enabled: true
+      minAvailable: 1
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: ui
+
+# --------------------------------------------------------------------------
+# Agent: a single scheduler replica is fine (it is stateless and resumes from
+# the API). Bump if you want redundancy of the scheduler itself.
+# --------------------------------------------------------------------------
+ccf-agent:
+  replicaCount: 1

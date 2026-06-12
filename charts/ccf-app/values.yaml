@@ -88,6 +88,21 @@ api:
   # starts. Required for login to work; disable only if you migrate externally.
   migrations:
     enabled: true
+  # Bootstrap a default admin user for the UI via a post-install/upgrade Job
+  # (idempotent: re-running does nothing if the user already exists). The
+  # password lives in a Secret, never in the Job spec. Off by default; the local
+  # overlay enables it for an out-of-the-box login.
+  adminUser:
+    enabled: false
+    email: admin@ccf.local
+    firstName: Admin
+    lastName: User
+    # -- Admin password. REQUIRED when enabled (unless existingSecret is set).
+    # Provide it at install time (e.g. make ... ADMIN_PASSWORD=...) so it never
+    # lands in git.
+    password: ""
+    # -- Optional existing Secret holding the password under key `password`.
+    existingSecret: ""
   database:
     driver: postgres
     sslmode: disable

@@ -26,6 +26,15 @@ ccf-app:
     allowedOrigins: "http://localhost:8000,http://localhost:3000"
     metrics:
       enabled: true
+    # Out-of-the-box UI login for local dev: a default admin is created on
+    # install via an idempotent Job. Override the password with
+    # `make up ADMIN_PASSWORD=...`; this default is for local use only.
+    adminUser:
+      enabled: true
+      email: admin@ccf.local
+      firstName: Admin
+      lastName: User
+      password: "Admin12345!"
     resources:
       requests:
         cpu: 50m

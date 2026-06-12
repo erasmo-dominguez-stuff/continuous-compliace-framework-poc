@@ -20,3 +20,10 @@ ccf-agent:
   apiUrl: "http://ccf-api:8080"
   # config:
   #   plugins: {}
+
+# Optional official Bitnami PostgreSQL dependency. MUST default to false here:
+# Helm only honours the `postgresql.enabled` dependency condition if the path
+# exists, otherwise the subchart is enabled by default. The built-in
+# ccf-app.postgres is used unless you opt into HA via values/postgres-ha.yaml.
+postgresql:
+  enabled: false

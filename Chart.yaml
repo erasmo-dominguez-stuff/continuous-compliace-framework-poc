@@ -26,5 +26,14 @@ dependencies:
     version: "0.1.0"
     repository: "file://charts/ccf-agent"
     condition: ccf-agent.enabled
+  # Optional: the official Bitnami PostgreSQL chart, for a reliable / fault
+  # tolerant datastore (persistence, PDB, metrics, and primary+read-replica
+  # streaming replication via architecture: replication). Disabled by default;
+  # the lightweight built-in StatefulSet (ccf-app.postgres) is used otherwise.
+  # Enabled by values/postgres-ha.yaml. See that overlay + the README.
+  - name: postgresql
+    version: "18.7.3"
+    repository: "oci://registry-1.docker.io/bitnamicharts"
+    condition: postgresql.enabled
 maintainers:
   - name: CCF deployment chart

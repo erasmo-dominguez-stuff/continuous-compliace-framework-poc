@@ -1,0 +1,88 @@
+{{- if and .Values.api.enabled .Values.api.adminUser.enabled -}}
+{{- $adminSecret := .Values.api.adminUser.existingSecret | default (printf "%s-admin" (include "ccf.api.fullname" .)) -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-admin-bootstrap
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-admin-bootstrap") | nindent 4 }}
+  annotations:
+    # Run after the chart's resources are in place, on every install/upgrade.
+    # Creating an existing user is a no-op (the CLI exits 0), so this is safe to
+    # re-run.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-admin-bootstrap") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ccf.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml (default .Values.podSecurityContext .Values.api.podSecurityContext) | nindent 8 }}
+      {{- if .Values.api.migrations.enabled }}
+      # Guarantee the schema exists even if the API pod isn't ready yet.
+      initContainers:
+        - name: migrate
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/api", "migrate", "up"]
+          securityContext:
+            {{- toYaml (default .Values.securityContext .Values.api.securityContext) | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- if or (not .Values.api.database.existingSecret) .Values.api.jwtSecret }}
+            - secretRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- end }}
+            {{- if .Values.api.database.existingSecret }}
+            - secretRef:
+                name: {{ .Values.api.database.existingSecret }}
+            {{- end }}
+      {{- end }}
+      containers:
+        - name: create-admin
+          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          securityContext:
+            {{- toYaml (default .Values.securityContext .Values.api.securityContext) | nindent 12 }}
+          command: ["/api", "users", "add"]
+          # Kubernetes substitutes $(CCF_ADMIN_PASSWORD) from env (no shell
+          # needed - the API image is distroless), so the password is sourced
+          # from the Secret and never appears in the Job spec.
+          args:
+            - "--email"
+            - {{ .Values.api.adminUser.email | quote }}
+            - "--first-name"
+            - {{ .Values.api.adminUser.firstName | quote }}
+            - "--last-name"
+            - {{ .Values.api.adminUser.lastName | quote }}
+            - "--password"
+            - "$(CCF_ADMIN_PASSWORD)"
+          env:
+            - name: CCF_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: password
+          envFrom:
+            - configMapRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- if or (not .Values.api.database.existingSecret) .Values.api.jwtSecret }}
+            - secretRef:
+                name: {{ include "ccf.api.fullname" . }}
+            {{- end }}
+            {{- if .Values.api.database.existingSecret }}
+            - secretRef:
+                name: {{ .Values.api.database.existingSecret }}
+            {{- end }}
+{{- end }}

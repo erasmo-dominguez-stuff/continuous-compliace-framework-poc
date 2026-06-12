@@ -9,3 +9,6 @@ charts/**/charts/*.tgz
 *.local.yaml
 values/**/*.local.yaml
 values/**/*.secret.yaml
+
+# Built policy bundles (opa build output)
+dist/

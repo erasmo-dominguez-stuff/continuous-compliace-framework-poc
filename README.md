@@ -79,12 +79,15 @@ values.yaml                  umbrella chart defaults (root)
 values/
 ├── local.yaml               environment: kind / Docker Desktop
 ├── aks.yaml                  environment: AKS test
+├── postgres-ha.yaml          reliability: official (Bitnami) HA Postgres + app HA
 └── plugins/                  reusable plugin overlays (combine freely)
     ├── local-ssh.yaml        local SSH hardening checks
-    └── github.yaml           GitHub repositories plugin
+    ├── github.yaml           GitHub repositories plugin
+    └── custom-policies.yaml  add your own policy bundle to a plugin
 charts/
 ├── ccf-app/values-production.yaml    per-subchart production values
 └── ccf-agent/values-production.yaml
+policies/                     custom Rego policies (author, test, bundle, push)
 ```
 
 Because Helm deep-merges values files, you can stack any environment with any
@@ -166,21 +169,95 @@ For a public URL instead of port-forward, switch the UI/API Services to
 `LoadBalancer` or enable `ingress` — both are documented at the bottom of
 `values/aks.yaml`.
 
+## Reliability and fault tolerance
+
+The defaults favour a small footprint (single API/UI/Postgres). For a resilient
+deployment, layer the **`values/postgres-ha.yaml`** overlay. It makes the whole
+stack tolerate a node/pod failure:
+
+- **PostgreSQL via the official Bitnami chart** in HA mode — one primary plus
+  streaming **read replicas**, with persistence, PodDisruptionBudgets and
+  metrics. This replaces the lightweight built-in StatefulSet (which is fine for
+  local/dev but is a single instance with no failover).
+- **API & UI** run **2 replicas** with PodDisruptionBudgets and pod
+  anti-affinity, so replicas spread across nodes.
+
+The official Postgres chart is wired in as an **optional** umbrella dependency
+(`postgresql.enabled`, off by default), so nothing changes unless you opt in:
+
+```bash
+helm dependency build .          # vendors the Bitnami postgresql subchart
+
+# Inject the DB password at install time (kept out of git); the Makefile sets it
+# on both the Bitnami chart and the API connection string:
+make install-aks EXTRA_VALUES="values/postgres-ha.yaml" \
+  PLUGIN_VALUES="values/plugins/local-ssh.yaml" \
+  PG_PASSWORD='<strong-password>'
+```
+
+The API connects to the writable primary at `ccf-postgresql-primary`. The
+overlay header documents the few knobs (replica count, storage class, and the
+Bitnami image-registry override needed if the default image can't be pulled).
+
+> For a Kubernetes-operator-managed Postgres with automated failover/backups,
+> CloudNativePG is a good alternative — point `ccf-app.postgres.enabled=false`
+> and set `ccf-app.api.database.host` to the cluster's primary Service.
+
 ## Logging in
 
-There are **no default credentials**. The chart runs database migrations
-automatically (a `migrate` init container on the API; `api.migrations.enabled`),
-so you only need to create a user with the API's built-in CLI:
+The chart runs database migrations automatically (a `migrate` init container on
+the API; `api.migrations.enabled`), and can **bootstrap a default admin user**
+for the UI.
+
+### Default admin (local: enabled out of the box)
+
+`values/local.yaml` enables a default admin, so after `make up` you can log in
+to the UI immediately:
+
+- **Email:** `admin@ccf.local`
+- **Password:** `Admin12345!`
+
+This is created by an idempotent post-install/upgrade Job (`api.adminUser`); the
+password is stored in a Secret and Kubernetes injects it into the Job, so it
+never appears in the Job spec. **Override the default password** (and use it on
+any non-local environment) via `ADMIN_PASSWORD`, which also enables the
+bootstrap:
+
+```bash
+make up        ADMIN_PASSWORD='<strong-password>'          # local, custom pw
+make install-aks ADMIN_PASSWORD='<strong-password>'        # enable it on AKS
+```
+
+Configure it directly via values when not using the Makefile:
+
+```yaml
+ccf-app:
+  api:
+    adminUser:
+      enabled: true
+      email: admin@ccf.local
+      firstName: Admin
+      lastName: User
+      password: ""            # set via --set-string, or use existingSecret
+      # existingSecret: ccf-admin   # Secret with key `password`
+```
+
+> The Job is safe to re-run: if the user already exists the CLI is a no-op (it
+> does **not** update an existing user's password — change that with
+> `kubectl -n ccf exec -it deploy/ccf-api -- /api users update ...`).
+
+### Create users manually
+
+You can always add users with the API's built-in CLI instead of (or in addition
+to) the bootstrap:
 
 ```bash
 kubectl -n ccf exec -it deploy/ccf-api -- /api users add \
-  --email admin@ccf.local --first-name Admin --last-name User --password 'Admin12345!'
+  --email someone@ccf.local --first-name Some --last-name One --password 'Str0ngPass!'
 ```
 
-Then log in to the UI with that email and password.
-
-> If you disabled `api.migrations.enabled`, run migrations once before creating a
-> user: `kubectl -n ccf exec -it deploy/ccf-api -- /api migrate up`.
+> If you disabled `api.migrations.enabled`, run migrations once first:
+> `kubectl -n ccf exec -it deploy/ccf-api -- /api migrate up`.
 
 ## Plugins (agent)
 
@@ -219,6 +296,35 @@ settings, …) at https://github.com/orgs/compliance-framework/repositories?q=pl
 Each plugin pairs with a `*-policies` bundle; set both `source` and `policies`
 and put plugin-specific settings under `config:` (see `values/plugins/github.yaml`).
 
+## Custom policies
+
+Policies are **Rego** (OPA) rules that assert the evidence a plugin collects is
+compliant. They are distributed as **OCI bundles** and referenced under
+`ccf-agent.config.plugins.<plugin>.policies`; the agent pulls them on schedule.
+
+This repo includes a ready-to-use scaffold under [`policies/`](policies/) — an
+example policy with unit tests — plus `Makefile` targets to author your own:
+
+```bash
+make policy-test       # opa unit tests        (policies/*_test.rego)
+make policy-validate   # opa compile/type check
+make policy-build      # opa build -> dist/policies-bundle.tar.gz
+make policy-push \      # build + push to your OCI registry (uses gooci)
+  POLICY_IMAGE=ghcr.io/<your-org>/ccf-custom-policies:v0.1.0 \
+  GHCR_USER=<user> GHCR_TOKEN=$GHCR_TOKEN
+```
+
+Then layer your bundle onto a plugin via `values/plugins/custom-policies.yaml`
+(it adds the custom bundle alongside the upstream GitHub policies and shows
+`policy_data` usage):
+
+```bash
+make up PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
+  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org>
+```
+
+See [`policies/README.md`](policies/README.md) for the authoring guide.
+
 ## Validate and test
 
 Everything is validatable both **offline** (no cluster) and **on a live
@@ -226,10 +332,11 @@ cluster**, via `Makefile` targets:
 
 | Target           | Needs cluster | What it checks |
 |------------------|:-------------:|----------------|
-| `make validate`  | no            | `helm lint` + renders **every** environment × plugin overlay combination |
-| `make dry-run`   | yes           | Server-side dry-run (`helm upgrade --dry-run=server`) against the selected context |
-| `make test`      | yes           | `helm test` — in-cluster Pod that curls the API (`/api/auth/publickey`) and UI |
-| `make smoke`     | yes           | Waits for all rollouts (postgres/api/ui/agent), then runs `make test` |
+| `make validate`    | no            | `helm lint` + renders **every** environment × plugin overlay combination (incl. the HA overlay) |
+| `make policy-test` | no            | `opa test` the custom Rego policies under `policies/` |
+| `make dry-run`     | yes           | Server-side dry-run (`helm upgrade --dry-run=server`) against the selected context |
+| `make test`        | yes           | `helm test` — in-cluster Pod that curls the API (`/api/auth/publickey`) and UI |
+| `make smoke`       | yes           | Waits for all rollouts (postgres/api/ui/agent), then runs `make test` |
 
 ```bash
 # Offline: lint + render local & aks overlays with each plugin (incl. github)
