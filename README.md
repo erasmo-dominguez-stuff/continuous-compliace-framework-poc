@@ -40,19 +40,21 @@ ccf/                       umbrella chart (depends on the two below)
 - Helm 3.8+
 - A default StorageClass (for the PostgreSQL PVC) when `postgres.persistence.enabled=true`
 
-For a local cluster you can use either:
+The two supported demo targets are:
 
-- **`kind`** (`kind` + `kubectl` + `helm`), or
-- **Docker Desktop Kubernetes** (`docker` with Kubernetes enabled + `kubectl` + `helm`).
+- **Local — Docker Desktop Kubernetes** (Docker Desktop with Kubernetes enabled,
+  plus `kubectl` and `helm`). Context: `docker-desktop`.
+- **AKS** (Azure Kubernetes Service) for a cloud test (plus the Azure CLI).
 
-Both are driven by the `Makefile` (see [Local deployment](#local-deployment)).
+Both are driven by the `Makefile` (see [Local deployment](#local-deployment)
+and [AKS](#test-deployment-on-aks-azure)).
 
 ## Install
 
 Full stack via the umbrella (one command):
 
 ```bash
-helm install ccf . --namespace ccf --create-namespace \
+helm install ccf . --kube-context docker-desktop --namespace ccf --create-namespace \
   -f values/local.yaml -f values/plugins/local-ssh.yaml
 ```
 
@@ -77,7 +79,7 @@ first, then one or more reusable plugin overlays:
 ```
 values.yaml                  umbrella chart defaults (root)
 values/
-├── local.yaml               environment: kind / Docker Desktop
+├── local.yaml               environment: Docker Desktop Kubernetes
 ├── aks.yaml                  environment: AKS test
 ├── postgres-ha.yaml          reliability: official (Bitnami) HA Postgres + app HA
 └── plugins/                  reusable plugin overlays (combine freely)
@@ -95,56 +97,34 @@ set of plugins, e.g. `-f values/aks.yaml -f values/plugins/github.yaml`.
 
 ## Local deployment
 
-The `Makefile` wraps the full local flow and supports **two local Kubernetes
-runtimes** via the `RUNTIME` variable:
-
-| `RUNTIME` | Cluster                          | kube-context     |
-|-----------|----------------------------------|------------------|
-| `kind`    | local `kind` cluster (default)   | `kind-ccf`       |
-| `docker`  | Docker Desktop Kubernetes        | `docker-desktop` |
-
-Every `helm`/`kubectl` command issued by the `Makefile` is pinned to the
-selected context, so you never deploy to the wrong cluster by accident.
-
-### Option A — kind (default)
-
-Requires `kind`, `kubectl`, `helm`:
+Local runs on **Docker Desktop Kubernetes**. Enable it once in Docker Desktop
+(**Settings → Kubernetes → Enable Kubernetes**), then everything is one command.
+The `Makefile` pins every `helm`/`kubectl` call to the `docker-desktop` context,
+so you never deploy to the wrong cluster by accident.
 
 ```bash
-make up        # create cluster + install (values/local.yaml + local-ssh plugin)
-make pf        # port-forward UI (8000) and API (8080)
+make up    # verify docker-desktop + install (values/local.yaml + local-ssh + default admin)
+make pf    # port-forward UI (8000) and API (8080)
 ```
 
-### Option B — Docker Desktop Kubernetes
+Then open **http://localhost:8000** and log in with the default admin:
 
-Requires Docker Desktop with Kubernetes enabled
-(**Settings → Kubernetes → Enable Kubernetes**), plus `kubectl` and `helm`:
+- **Email:** `admin@ccf.local`
+- **Password:** `Admin12345!`
+
+The UI talks to the API at `http://localhost:8080` (`ui.apiUrl` in
+`values/local.yaml`), matching the port-forward. `values/local.yaml` disables
+persistence and trims resources for laptops, and enables the default admin (see
+[Logging in](#logging-in)). Tear down with:
 
 ```bash
-make up-docker  # verify the docker-desktop context + helm install
-make pf-docker  # port-forward UI (8000) and API (8080)
+make down   # uninstall the release (the Docker Desktop cluster keeps running)
 ```
 
-`make up-docker` is shorthand for `make RUNTIME=docker up`; any target accepts
-the `RUNTIME=docker` override (e.g. `make RUNTIME=docker status`). It checks
-that the `docker-desktop` context exists and is reachable before installing, so
-you get a clear error if Kubernetes is not enabled in Docker Desktop.
-
-### After it's up (both options)
-
-Open http://localhost:8000. The UI talks to the API at `http://localhost:8080`
-(`ui.apiUrl` in `values/local.yaml`), matching the port-forward.
-
-`values/local.yaml` disables persistence and trims resources for laptops; it
-works unchanged on both runtimes. Tear down with:
-
-```bash
-make down         # kind: uninstall release + delete the cluster
-make down-docker  # docker: uninstall release (cluster keeps running)
-```
-
-> The bundled `helm dependency build` step (subchart vendoring) runs
-> automatically before every install via the `deps` target.
+> `make up` runs `helm dependency build` (subchart vendoring) automatically via
+> the `deps` target. If `make up` reports the `docker-desktop` context is
+> missing or unreachable, make sure Docker Desktop is running with Kubernetes
+> enabled.
 
 ## Test deployment on AKS (Azure)
 
@@ -154,20 +134,17 @@ needed for Azure Disk) and resource requests/limits. Plugins are layered from
 `values/plugins/` (the `local-ssh` overlay by default).
 
 ```bash
-az aks get-credentials --resource-group <rg> --name <aks-name>
-make install-aks    # installs on the CURRENT kube-context (your AKS cluster)
+az aks get-credentials --resource-group <rg> --name <aks-name>  # selects the context
+make install-aks ADMIN_PASSWORD='<strong-password>'   # installs on the CURRENT context
 
-# Access via port-forward (no public networking required):
-kubectl -n ccf port-forward svc/ccf-ui 8000:80
-kubectl -n ccf port-forward svc/ccf-api 8080:8080
-# open http://localhost:8000
+make pf-aks    # port-forward UI (8000) and API (8080) against the AKS context
+# open http://localhost:8000  (admin@ccf.local / your ADMIN_PASSWORD)
 ```
 
-CCF ships **no default user**; create one (see [Logging in](#logging-in)).
-
-For a public URL instead of port-forward, switch the UI/API Services to
-`LoadBalancer` or enable `ingress` — both are documented at the bottom of
-`values/aks.yaml`.
+`make install-aks` deploys to your **current** kube-context (it prints which one
+first as a safety check) and uses no public networking — access is via
+`make pf-aks`. For a public URL, see the LoadBalancer/ingress notes at the
+bottom of `values/aks.yaml`.
 
 ## Reliability and fault tolerance
 
@@ -334,7 +311,6 @@ cluster**, via `Makefile` targets:
 |------------------|:-------------:|----------------|
 | `make validate`    | no            | `helm lint` + renders **every** environment × plugin overlay combination (incl. the HA overlay) |
 | `make policy-test` | no            | `opa test` the custom Rego policies under `policies/` |
-| `make dry-run`     | yes           | Server-side dry-run (`helm upgrade --dry-run=server`) against the selected context |
 | `make test`        | yes           | `helm test` — in-cluster Pod that curls the API (`/api/auth/publickey`) and UI |
 | `make smoke`       | yes           | Waits for all rollouts (postgres/api/ui/agent), then runs `make test` |
 

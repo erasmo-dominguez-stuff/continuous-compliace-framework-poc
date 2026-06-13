@@ -1,12 +1,12 @@
-# Local environment overlay (kind / Docker Desktop Kubernetes).
+# Local environment overlay (Docker Desktop Kubernetes).
 #
 # Environment config only (resources, persistence, access). Plugins live in
 # values/plugins/ and are layered on top so they can be reused across
 # environments:
 #
 #   helm dependency build .
-#   helm upgrade --install ccf . -n ccf --create-namespace \
-#     -f values/local.yaml -f values/plugins/local-ssh.yaml
+#   helm upgrade --install ccf . --kube-context docker-desktop \
+#     -n ccf --create-namespace -f values/local.yaml -f values/plugins/local-ssh.yaml
 #   # or simply: make up
 #
 # Disables persistence and trims resources for laptops.
