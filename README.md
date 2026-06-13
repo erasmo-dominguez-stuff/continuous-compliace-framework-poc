@@ -422,26 +422,59 @@ kubectl apply -n argocd -f argocd/root-application.yaml
 > Update `repoURL` / `targetRevision` (`main` by default) in each file to match
 > your fork and branch.
 
-## Observability with Grafana Alloy
+## Observability (logs + metrics for the whole CCF stack)
+
+A self-contained, ready-to-use observability stack ships with the repo:
+
+- **Loki** — log store
+- **Prometheus** — metrics store
+- **Grafana Alloy** — collector: streams logs and scrapes metrics from every
+  `app.kubernetes.io/part-of=ccf` pod
+- **Grafana** — pre-provisioned with both datasources **and** a CCF dashboard
+  (no manual setup)
 
 All CCF workloads carry the label `app.kubernetes.io/part-of=ccf`, and the API
 pods are annotated for Prometheus scraping (`/metrics` on port `9090`,
 controlled by `api.metrics`). [`observability/alloy-values.yaml`](./observability/alloy-values.yaml)
-configures Grafana Alloy to:
+sends logs to Loki and `remote_write`s scraped metrics to Prometheus;
+[`observability/grafana-values.yaml`](./observability/grafana-values.yaml)
+provisions Grafana.
 
-- **Logs**: stream container logs of all `part-of=ccf` pods to Loki.
-- **Metrics**: scrape pods annotated `prometheus.io/scrape=true` and
-  `remote_write` them to a Prometheus-compatible backend.
-
-Install (with an optional local Loki + Prometheus stack for testing):
+### One command
 
 ```bash
-make obs-stack   # minimal Loki + Prometheus in the observability namespace
-make obs-alloy   # Grafana Alloy collecting CCF logs & metrics
+make up-obs       # CCF + Loki + Prometheus + Grafana + Alloy
+make pf-all       # port-forward EVERYTHING useful at once (see below)
 ```
 
-Edit the two endpoint URLs at the bottom of `alloy-values.yaml` to point at your
-own Loki / Prometheus (or Grafana Cloud) backends.
+`make pf-all` exposes the whole stack locally in one command:
+
+| Service    | URL                     | Notes              |
+|------------|-------------------------|--------------------|
+| CCF UI     | http://localhost:8000   | `admin@ccf.local`  |
+| CCF API    | http://localhost:8080   |                    |
+| Grafana    | http://localhost:3000   | `admin` / `admin`  |
+| Prometheus | http://localhost:9091   |                    |
+| Loki       | http://localhost:3100   | raw LogQL          |
+
+(Observability ports are skipped silently if that stack isn't installed; use
+`make pf` for just UI + API.)
+
+Open the **"CCF - Logs & Metrics"** dashboard in Grafana: live container logs
+(filterable by component) and API metrics (targets up, goroutines, memory) for
+the whole stack.
+
+### Step by step
+
+```bash
+make obs-stack   # Loki + Prometheus + Grafana (provisioned) in the observability ns
+make obs-alloy   # Grafana Alloy collecting CCF logs & metrics
+make obs-grafana # http://localhost:3000  (admin / admin)
+make obs-loki    # optional: port-forward Loki (3100) for raw LogQL queries
+```
+
+To use your own backends (e.g. Grafana Cloud), edit the endpoint URLs at the
+bottom of `alloy-values.yaml` and the datasource URLs in `grafana-values.yaml`.
 
 ## Production checklist
 

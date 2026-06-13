@@ -1,0 +1,171 @@
+# Values for the grafana/grafana Helm chart: a ready-to-use Grafana that points
+# at the local Loki + Prometheus backends (created by `make obs-stack`) and ships
+# a pre-provisioned CCF dashboard (logs + metrics).
+#
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm upgrade --install ccf-grafana grafana/grafana \
+#     -n observability --create-namespace -f observability/grafana-values.yaml
+#   # then: make obs-grafana  -> http://localhost:3000  (admin / admin)
+#
+# Datasources and the dashboard are provisioned on startup, so there is nothing
+# to click-configure: open Grafana and the "CCF - Logs & Metrics" dashboard is
+# already there.
+
+# Local-only credentials. Override on shared clusters (e.g. --set adminPassword=...).
+adminUser: admin
+adminPassword: admin
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Keep it light for laptops.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+persistence:
+  enabled: false
+
+# --------------------------------------------------------------------------
+# Datasources (provisioned). Fixed UIDs so the dashboard can reference them.
+# URLs match the local stack from `make obs-stack`.
+# --------------------------------------------------------------------------
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.observability.svc.cluster.local
+        isDefault: true
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://loki.observability.svc.cluster.local:3100
+
+# --------------------------------------------------------------------------
+# Dashboard provider: load JSON dashboards from disk. The folder name ("ccf")
+# must match the key under `dashboards` below.
+# --------------------------------------------------------------------------
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: ccf
+        orgId: 1
+        folder: CCF
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/ccf
+
+dashboards:
+  ccf:
+    ccf-overview:
+      json: |
+        {
+          "annotations": {"list": []},
+          "editable": true,
+          "graphTooltip": 1,
+          "title": "CCF - Logs & Metrics",
+          "uid": "ccf-overview",
+          "schemaVersion": 39,
+          "version": 1,
+          "tags": ["ccf"],
+          "time": {"from": "now-1h", "to": "now"},
+          "templating": {
+            "list": [
+              {
+                "name": "component",
+                "label": "Component",
+                "type": "query",
+                "datasource": {"type": "loki", "uid": "loki"},
+                "query": "label_values({job=\"ccf\"}, component)",
+                "refresh": 2,
+                "includeAll": true,
+                "multi": true,
+                "allValue": ".*",
+                "current": {"selected": true, "text": ["All"], "value": ["$__all"]}
+              }
+            ]
+          },
+          "panels": [
+            {
+              "type": "row",
+              "title": "Logs (Loki)",
+              "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+            },
+            {
+              "type": "timeseries",
+              "title": "Log volume by component",
+              "datasource": {"type": "loki", "uid": "loki"},
+              "gridPos": {"h": 7, "w": 24, "x": 0, "y": 1},
+              "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 60, "stacking": {"mode": "normal"}}}, "overrides": []},
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "sum by (component) (count_over_time({job=\"ccf\", component=~\"$component\"}[1m]))"
+                }
+              ]
+            },
+            {
+              "type": "logs",
+              "title": "CCF logs",
+              "datasource": {"type": "loki", "uid": "loki"},
+              "gridPos": {"h": 12, "w": 24, "x": 0, "y": 8},
+              "options": {"showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none"},
+              "targets": [
+                {
+                  "refId": "A",
+                  "datasource": {"type": "loki", "uid": "loki"},
+                  "expr": "{job=\"ccf\", component=~\"$component\"}"
+                }
+              ]
+            },
+            {
+              "type": "row",
+              "title": "Metrics (Prometheus)",
+              "gridPos": {"h": 1, "w": 24, "x": 0, "y": 20}
+            },
+            {
+              "type": "stat",
+              "title": "Scrape targets up",
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "gridPos": {"h": 6, "w": 6, "x": 0, "y": 21},
+              "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}]}, "overrides": []},
+              "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"},
+              "targets": [
+                {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "up{job=\"ccf\"}", "legendFormat": "{{pod}}"}
+              ]
+            },
+            {
+              "type": "timeseries",
+              "title": "Go goroutines",
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "gridPos": {"h": 6, "w": 9, "x": 6, "y": 21},
+              "targets": [
+                {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "go_goroutines{job=\"ccf\"}", "legendFormat": "{{pod}}"}
+              ]
+            },
+            {
+              "type": "timeseries",
+              "title": "Resident memory",
+              "datasource": {"type": "prometheus", "uid": "prometheus"},
+              "gridPos": {"h": 6, "w": 9, "x": 15, "y": 21},
+              "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+              "targets": [
+                {"refId": "A", "datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "process_resident_memory_bytes{job=\"ccf\"}", "legendFormat": "{{pod}}"}
+              ]
+            }
+          ]
+        }

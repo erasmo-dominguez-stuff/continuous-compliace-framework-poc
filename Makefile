@@ -93,8 +93,10 @@ up: deps docker-ensure ## Install CCF locally on Docker Desktop (then `make pf`)
 	@echo "Then open http://localhost:8000  (admin@ccf.local / Admin12345!)"
 
 .PHONY: up-obs
-up-obs: up obs-stack obs-alloy ## Local demo + observability (Loki/Prometheus/Alloy)
+up-obs: up obs-stack obs-alloy ## Local demo + observability (Loki/Prometheus/Grafana/Alloy)
+	@echo ""
 	@echo "Observability installed in namespace '$(OBS_NAMESPACE)'."
+	@echo "Open Grafana with:  make obs-grafana   then http://localhost:3000  (admin/admin)"
 
 .PHONY: down
 down: ## Uninstall the CCF release (Docker Desktop cluster stays)
@@ -107,6 +109,23 @@ pf: ## Port-forward UI (8000) and API (8080) on Docker Desktop
 .PHONY: pf-aks
 pf-aks: ## Port-forward UI (8000) and API (8080) on the current (AKS) context
 	@$(MAKE) --no-print-directory _pf KUBE_CONTEXT=$(shell kubectl config current-context)
+
+.PHONY: pf-all
+pf-all: ## Port-forward everything useful: UI, API, Grafana, Prometheus, Loki
+	@echo "Context: $(KUBE_CONTEXT)"
+	@echo "UI         -> http://localhost:8000"
+	@echo "API        -> http://localhost:8080"
+	@echo "Grafana    -> http://localhost:3000   (admin / admin)"
+	@echo "Prometheus -> http://localhost:9091"
+	@echo "Loki       -> http://localhost:3100"
+	@echo "(observability targets are skipped silently if not installed)"
+	@trap 'kill 0' EXIT; \
+	$(KUBECTL) -n $(NAMESPACE) port-forward svc/$(RELEASE)-ui 8000:80 & \
+	$(KUBECTL) -n $(NAMESPACE) port-forward svc/$(RELEASE)-api 8080:8080 & \
+	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/ccf-grafana 3000:80 2>/dev/null & \
+	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/prometheus-server 9091:80 2>/dev/null & \
+	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/loki 3100:3100 2>/dev/null & \
+	wait
 
 .PHONY: _pf
 _pf:
@@ -232,12 +251,13 @@ obs-repos: ## Add Grafana/Prometheus helm repos
 	helm repo update
 
 .PHONY: obs-stack
-obs-stack: obs-repos ## Install a minimal Loki + Prometheus stack for local testing
+obs-stack: obs-repos ## Install Loki + Prometheus + Grafana (pre-provisioned) for local testing
 	helm upgrade --install loki grafana/loki $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \
 		--set deploymentMode=SingleBinary \
 		--set loki.commonConfig.replication_factor=1 \
 		--set loki.storage.type=filesystem \
+		--set loki.useTestSchema=true \
 		--set loki.auth_enabled=false \
 		--set singleBinary.replicas=1 \
 		--set read.replicas=0 --set write.replicas=0 --set backend.replicas=0 \
@@ -247,6 +267,9 @@ obs-stack: obs-repos ## Install a minimal Loki + Prometheus stack for local test
 		--set server.extraFlags="{web.enable-remote-write-receiver}" \
 		--set alertmanager.enabled=false \
 		--set prometheus-pushgateway.enabled=false
+	helm upgrade --install ccf-grafana grafana/grafana $(HELM_CTX) \
+		--namespace $(OBS_NAMESPACE) --create-namespace \
+		-f observability/grafana-values.yaml
 
 .PHONY: obs-alloy
 obs-alloy: obs-repos ## Install Grafana Alloy to collect CCF logs & metrics
@@ -255,5 +278,11 @@ obs-alloy: obs-repos ## Install Grafana Alloy to collect CCF logs & metrics
 		-f observability/alloy-values.yaml
 
 .PHONY: obs-grafana
-obs-grafana: ## Port-forward Loki (3100) for local querying
+obs-grafana: ## Port-forward Grafana (3000) - CCF dashboard, admin/admin
+	@echo "Grafana -> http://localhost:3000   (admin / admin)"
+	@echo "Dashboard: CCF - Logs & Metrics"
+	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/ccf-grafana 3000:80
+
+.PHONY: obs-loki
+obs-loki: ## Port-forward Loki (3100) for raw querying
 	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/loki 3100:3100
