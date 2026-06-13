@@ -1,21 +1,26 @@
-# CCF Helm chart - local (Docker Desktop) & AKS helpers.
+# CCF Helm chart - local (Docker Desktop) & AKS helpers.  Run `make help`.
+#
+# Headline commands:
+#   make up      # start the full CCF stack locally (Docker Desktop)
+#   make obs     # start the observability stack (Loki/Prometheus/Grafana/Alloy)
+#   make pf-all  # port-forward everything (CCF UI/API + Grafana/Prometheus/Loki)
+#   make aks     # install CCF on AKS (current kube-context)
+#   make policy  # validate + unit-test the custom Rego policies
+#   make down    # uninstall the CCF release
 #
 # Local demo (Docker Desktop Kubernetes):
-#   make up         # install CCF on docker-desktop (+ default admin + ssh plugin)
-#   make pf         # port-forward UI (8000) and API (8080)
-#   open http://localhost:8000   (admin@ccf.local / Admin12345!)
-#   make down       # uninstall the release (cluster stays)
+#   make up && make pf          # then open http://localhost:8000
+#   #                             (admin@ccf.local / Admin12345!)
 #
 # AKS demo:
 #   az aks get-credentials --resource-group <rg> --name <aks>   # selects the context
-#   make install-aks ADMIN_PASSWORD='<strong-pw>'
-#   make pf-aks     # port-forward against the current (AKS) context
+#   make aks ADMIN_PASSWORD='<strong-pw>'
+#   make pf-aks                 # port-forward against the current (AKS) context
 #
 # Optional add-ons (any environment):
 #   GITHUB plugin:  make up PLUGIN_VALUES="values/plugins/local-ssh.yaml values/plugins/github.yaml" \
 #                     GITHUB_TOKEN=... GITHUB_ORG=...
 #   HA Postgres:    make up EXTRA_VALUES="values/postgres-ha.yaml" PG_PASSWORD=...
-#   Observability:  make up-obs
 
 NAMESPACE     ?= ccf
 OBS_NAMESPACE ?= observability
@@ -83,7 +88,7 @@ help: ## Show this help
 
 ## ---------------------------------------------------------------- local demo
 .PHONY: up
-up: deps docker-ensure ## Install CCF locally on Docker Desktop (then `make pf`)
+up: deps docker-ensure ## Start the full CCF stack locally on Docker Desktop (then `make pf`)
 	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
 		-f $(ENV_LOCAL) $(OVERLAY_ARGS) --wait --timeout 5m
@@ -92,11 +97,11 @@ up: deps docker-ensure ## Install CCF locally on Docker Desktop (then `make pf`)
 	@echo "CCF is up on '$(KUBE_CONTEXT)'. Expose it with:  make pf"
 	@echo "Then open http://localhost:8000  (admin@ccf.local / Admin12345!)"
 
-.PHONY: up-obs
-up-obs: up obs-stack obs-alloy ## Local demo + observability (Loki/Prometheus/Grafana/Alloy)
+.PHONY: obs
+obs: obs-stack obs-alloy ## Start the observability stack (Loki/Prometheus/Grafana/Alloy)
 	@echo ""
 	@echo "Observability installed in namespace '$(OBS_NAMESPACE)'."
-	@echo "Open Grafana with:  make obs-grafana   then http://localhost:3000  (admin/admin)"
+	@echo "See everything with:  make pf-all   (Grafana on http://localhost:3000, admin/admin)"
 
 .PHONY: down
 down: ## Uninstall the CCF release (Docker Desktop cluster stays)
@@ -107,7 +112,7 @@ pf: ## Port-forward UI (8000) and API (8080) on Docker Desktop
 	@$(MAKE) --no-print-directory _pf KUBE_CONTEXT=$(KUBE_CONTEXT)
 
 .PHONY: pf-aks
-pf-aks: ## Port-forward UI (8000) and API (8080) on the current (AKS) context
+pf-aks: ## (AKS) Port-forward UI (8000) and API (8080) on the current context
 	@$(MAKE) --no-print-directory _pf KUBE_CONTEXT=$(shell kubectl config current-context)
 
 .PHONY: pf-all
@@ -142,7 +147,7 @@ status: ## Show CCF pods and services
 	$(KUBECTL) get pods,svc -n $(NAMESPACE)
 
 .PHONY: docker-ensure
-docker-ensure: ## Verify Docker Desktop Kubernetes is enabled and reachable
+docker-ensure: # Verify Docker Desktop Kubernetes is enabled and reachable
 	@kubectl config get-contexts $(KUBE_CONTEXT) >/dev/null 2>&1 || { \
 		echo "ERROR: kube-context '$(KUBE_CONTEXT)' not found."; \
 		echo "Enable it in Docker Desktop: Settings > Kubernetes > Enable Kubernetes."; \
@@ -152,22 +157,25 @@ docker-ensure: ## Verify Docker Desktop Kubernetes is enabled and reachable
 		exit 1; }
 	@echo "Docker Desktop Kubernetes is reachable (context: $(KUBE_CONTEXT))"
 
-## ---------------------------------------------------------------- AKS demo
-.PHONY: install-aks
-install-aks: deps ## Install CCF on the CURRENT context (AKS) with the aks overlay
+## ---------------------------------------------------------------- AKS
+.PHONY: aks
+aks: deps ## (AKS) Install CCF on the CURRENT kube-context with the aks overlay
 	@echo "Deploying to current context: $$(kubectl config current-context)"
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) --create-namespace \
 		-f $(ENV_AKS) $(OVERLAY_ARGS) --wait --timeout 8m
 	@echo "Expose it with:  make pf-aks   then open http://localhost:8000"
 
+.PHONY: install-aks
+install-aks: aks # Backwards-compatible alias for `make aks`
+
 ## ---------------------------------------------------------------- build & test
 .PHONY: deps
-deps: ## Build umbrella chart dependencies (vendored subchart .tgz)
+deps: # Build umbrella chart dependencies (vendored subchart .tgz)
 	helm dependency build $(CHART_DIR)
 
 .PHONY: lint
-lint: ## helm lint umbrella + subcharts
+lint: # helm lint umbrella + subcharts
 	helm lint $(CHART_DIR)
 	helm lint $(CHART_DIR)/charts/ccf-app
 	helm lint $(CHART_DIR)/charts/ccf-agent
@@ -177,7 +185,7 @@ validate: deps lint template-all ## Offline validation: lint + render every env/
 	@echo "OK: charts lint and every environment x plugin overlay renders."
 
 .PHONY: template-all
-template-all: deps ## Render every environment x plugin overlay combination (no cluster)
+template-all: deps # Render every environment x plugin overlay combination (no cluster)
 	@set -e; \
 	for env in $(ENV_LOCAL) $(ENV_AKS); do \
 		echo "--- $$env (base) ---"; \
@@ -204,26 +212,30 @@ smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
 	@$(MAKE) --no-print-directory test
 
 .PHONY: test
-test: ## Run helm test hooks (in-cluster API/UI connectivity)
+test: # Run helm test hooks (in-cluster API/UI connectivity)
 	helm test $(RELEASE) -n $(NAMESPACE) $(HELM_CTX) --logs
 
 ## ---------------------------------------------------------------- custom policies
+.PHONY: policy
+policy: policy-validate policy-test ## Validate + unit-test the custom Rego policies
+	@echo "OK: custom policies compile and pass their unit tests."
+
 .PHONY: policy-validate
-policy-validate: ## opa check: compile/type-check custom Rego policies
+policy-validate: # opa check: compile/type-check custom Rego policies
 	opa check $(POLICY_DIR)
 
 .PHONY: policy-test
-policy-test: ## opa test: run custom policy unit tests
+policy-test: # opa test: run custom policy unit tests
 	opa test $(POLICY_DIR) -v
 
 .PHONY: policy-build
-policy-build: policy-validate ## Build the custom policy OCI bundle
+policy-build: policy-validate # Build the custom policy OCI bundle
 	@mkdir -p $(dir $(POLICY_BUNDLE))
 	opa build -b $(POLICY_DIR) -o $(POLICY_BUNDLE)
 	@echo "built $(POLICY_BUNDLE)"
 
 .PHONY: policy-push
-policy-push: policy-build ## Push the policy bundle to an OCI registry (POLICY_IMAGE, GHCR_USER, GHCR_TOKEN)
+policy-push: policy-build ## Build & push the policy bundle to an OCI registry (POLICY_IMAGE, GHCR_USER, GHCR_TOKEN)
 	@command -v gooci >/dev/null 2>&1 || { echo "installing gooci $(GOOCI_VERSION)..."; go install github.com/compliance-framework/gooci@$(GOOCI_VERSION); }
 	@test -n "$(GHCR_TOKEN)" || { echo "GHCR_TOKEN is required (read/write packages token)"; exit 1; }
 	gooci login ghcr.io --username $(GHCR_USER) --password $(GHCR_TOKEN)
@@ -232,26 +244,26 @@ policy-push: policy-build ## Push the policy bundle to an OCI registry (POLICY_I
 
 ## ---------------------------------------------------------------- standalone charts
 .PHONY: install-app
-install-app: deps ## Install ccf-app standalone (production values)
+install-app: deps # Install ccf-app standalone (production values)
 	helm upgrade --install ccf-app $(CHART_DIR)/charts/ccf-app $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
 		-f $(CHART_DIR)/charts/ccf-app/values-production.yaml
 
 .PHONY: install-agent
-install-agent: ## Install ccf-agent standalone (production values)
+install-agent: # Install ccf-agent standalone (production values)
 	helm upgrade --install ccf-agent $(CHART_DIR)/charts/ccf-agent $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
 		-f $(CHART_DIR)/charts/ccf-agent/values-production.yaml
 
-## ---------------------------------------------------------------- observability
+## ---------------------------------------------------------------- observability (internals)
 .PHONY: obs-repos
-obs-repos: ## Add Grafana/Prometheus helm repos
+obs-repos: # Add Grafana/Prometheus helm repos
 	helm repo add grafana https://grafana.github.io/helm-charts
 	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 	helm repo update
 
 .PHONY: obs-stack
-obs-stack: obs-repos ## Install Loki + Prometheus + Grafana (pre-provisioned) for local testing
+obs-stack: obs-repos # Install Loki + Prometheus + Grafana (pre-provisioned) for local testing
 	helm upgrade --install loki grafana/loki $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \
 		--set deploymentMode=SingleBinary \
@@ -272,17 +284,17 @@ obs-stack: obs-repos ## Install Loki + Prometheus + Grafana (pre-provisioned) fo
 		-f observability/grafana-values.yaml
 
 .PHONY: obs-alloy
-obs-alloy: obs-repos ## Install Grafana Alloy to collect CCF logs & metrics
+obs-alloy: obs-repos # Install Grafana Alloy to collect CCF logs & metrics
 	helm upgrade --install ccf-alloy grafana/alloy $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \
 		-f observability/alloy-values.yaml
 
 .PHONY: obs-grafana
-obs-grafana: ## Port-forward Grafana (3000) - CCF dashboard, admin/admin
+obs-grafana: # Port-forward Grafana (3000) - CCF dashboard, admin/admin
 	@echo "Grafana -> http://localhost:3000   (admin / admin)"
 	@echo "Dashboard: CCF - Logs & Metrics"
 	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/ccf-grafana 3000:80
 
 .PHONY: obs-loki
-obs-loki: ## Port-forward Loki (3100) for raw querying
+obs-loki: # Port-forward Loki (3100) for raw querying
 	$(KUBECTL) -n $(OBS_NAMESPACE) port-forward svc/loki 3100:3100

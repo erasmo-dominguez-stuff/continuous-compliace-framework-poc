@@ -6,7 +6,9 @@ description: |
   See https://continuouscompliance.io/
 type: application
 version: 0.1.0
-appVersion: "0.11.0"
+# API image tag (ccf-app.api.image.tag defaults to this). Must be >= 0.13.0 for
+# the agent's subject/risk-template upserts; 0.16.0 is the upstream known-good set.
+appVersion: "0.16.0"
 keywords:
   - compliance
   - oscal

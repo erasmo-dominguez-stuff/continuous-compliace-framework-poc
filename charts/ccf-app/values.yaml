@@ -165,7 +165,8 @@ ui:
   replicaCount: 1
   image:
     repository: ghcr.io/compliance-framework/ui
-    tag: "2.6.1"
+    # 2.9.1 is the upstream known-good UI for API 0.16.0.
+    tag: "2.9.1"
     pullPolicy: IfNotPresent
   apiUrl: ""
   service:
