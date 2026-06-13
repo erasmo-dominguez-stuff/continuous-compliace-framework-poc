@@ -103,6 +103,14 @@ api:
     password: ""
     # -- Optional existing Secret holding the password under key `password`.
     existingSecret: ""
+  # Seed demo OSCAL data (a small "goodread" catalog + SSP + assessment plan +
+  # results + POA&M) so the UI isn't empty on a fresh install. CCF starts with no
+  # OSCAL content by design; without this the catalogs/plans/dashboards are empty.
+  # Off by default; enable for demos (the files live in seed/oscal/ and are
+  # mounted from a ConfigMap, then imported in dependency order via `/api oscal
+  # import`). Idempotent enough for demos; re-running may create duplicates.
+  seedData:
+    enabled: false
   database:
     driver: postgres
     sslmode: disable

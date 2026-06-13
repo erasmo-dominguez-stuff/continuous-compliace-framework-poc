@@ -1,69 +1,156 @@
 # Custom CCF policies
 
-CCF validates the evidence collected by plugins against **policies written in
-Rego** (OPA). Policies are distributed as **OCI bundles** and referenced from
-the agent config under `ccf-agent.config.plugins.<plugin>.policies`. The agent
-pulls the bundle on its schedule and passes it to the plugin, which reports a
-finding for every `violation`.
+Author, test, bundle, and deploy **Rego (OPA) policies** that evaluate evidence collected by CCF plugins.
 
-This directory is a self-contained example of authoring, testing, bundling and
-shipping **your own** policies, mirroring the layout of the upstream
-`*-policies` repos (e.g. `compliance-framework/plugin-github-repositories-policies`).
+> **Full integration guide:** [docs/policies-and-plugins.md](../docs/policies-and-plugins.md)
+
+## How policies connect to CCF
+
+```mermaid
+flowchart LR
+    REGO["policies/*.rego"] --> TEST["make policy"]
+    TEST --> BUILD["make policy-build"]
+    BUILD --> PUSH["make policy-push"]
+    PUSH --> HELM["values/plugins/<br/>custom-policies.yaml"]
+    HELM --> AGENT["ccf-agent"]
+    AGENT --> API["CCF API → UI"]
+```
+
+Policies are **not** deployed as Kubernetes resources. The pipeline is:
+
+1. Write Rego under this directory
+2. Test with `make policy`
+3. Build + push OCI bundle with `make policy-push`
+4. Reference the bundle in `plugins.<name>.policies[]` (Helm overlay)
+5. Agent pulls and plugin evaluates at schedule time
+
+## Directory layout
 
 ```
 policies/
-├── custom_repo_baseline.rego        example policy (GitHub repositories plugin)
-├── custom_repo_baseline_test.rego   opa unit tests for the policy
+├── custom_repo_baseline.rego        example policy (GitHub repositories)
+├── custom_repo_baseline_test.rego   unit tests
 └── README.md
 ```
 
-## Authoring
+## Policy anatomy
 
-A policy is a Rego file whose package starts with `compliance_framework.` and
-exposes:
+Package name must start with `compliance_framework.`:
 
-- `violation[...] if { ... }` — one entry per detected breach. Empty set = pass.
-- `title`, `description`, `remarks` — human-readable metadata for the report.
-- `risk_templates` — optional structured risk/remediation metadata (OSCAL-style).
+```rego
+package compliance_framework.my_policy
 
-The plugin feeds the collected evidence in as `input`. Inspect the matching
-plugin's docs (or its `*-policies` repo tests) to learn the `input` shape.
+# Required: violations (empty set = compliant)
+violation contains {"id": "some_breach"} if {
+    input.settings.some_field == "bad"
+}
 
-## Test, validate, bundle, push
+# Recommended metadata for reports
+title := "My policy title"
+description := "What this policy checks"
+remarks := "Why it matters"
 
-All wired into the repo `Makefile` (run from the repo root). They use the same
-toolchain as upstream: `opa` for testing/bundling and
-[`gooci`](https://github.com/compliance-framework/gooci) to push the bundle to
-an OCI registry.
-
-```bash
-make policy-test       # opa test ./policies  (unit tests)
-make policy-validate   # opa check ./policies (compile/type check)
-make policy-build      # opa build -> dist/policies-bundle.tar.gz
-make policy-push \      # push the bundle to your registry (read/write creds)
-  POLICY_IMAGE=ghcr.io/<your-org>/ccf-custom-policies:v0.1.0 \
-  GHCR_USER=<user> GHCR_TOKEN=$GHCR_TOKEN
+# Optional OSCAL-style risk/remediation templates
+risk_templates := [
+    {
+        "name": "Example risk",
+        "title": "Human-readable title",
+        "statement": "Risk description",
+        "remediation": {
+            "title": "How to fix",
+            "tasks": [{"title": "Step one"}],
+        },
+    },
+]
 ```
 
-## Use it in CCF
+### Input shape
 
-Reference the pushed bundle from a plugin in your agent config. The
-`values/plugins/custom-policies.yaml` overlay shows this layered on top of the
-GitHub plugin:
+The plugin passes collected evidence as `input`. Inspect the matching plugin's upstream `*-policies` repo for examples. The GitHub plugin uses shapes like:
+
+```rego
+input.settings.description
+input.settings.visibility      # "public" | "private"
+input.settings.archived        # true | false
+```
+
+### Policy data (`data.custom.*`)
+
+Static config from Helm `policy_data`:
 
 ```yaml
-ccf-agent:
-  config:
-    plugins:
-      github_repos:
-        policies:
-          - ghcr.io/compliance-framework/plugin-github-repositories-policies:v0.7.0
-          - ghcr.io/<your-org>/ccf-custom-policies:v0.1.0   # <- your bundle
+# in values/plugins/custom-policies.yaml
+policy_data:
+  allow_public_repositories: false
 ```
 
-Then deploy with the overlay layered on, e.g.:
+```rego
+default allow_public := false
+allow_public if { data.custom.allow_public_repositories == true }
+```
+
+## Commands
+
+From the repo root:
 
 ```bash
-make up PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
+make policy            # validate (opa check) + unit tests (opa test)
+make policy-build      # build dist/policies-bundle.tar.gz
+make policy-push \      # push to OCI registry
+  POLICY_IMAGE=ghcr.io/<your-org>/ccf-custom-policies:v0.1.0 \
+  GHCR_USER=<user> \
+  GHCR_TOKEN=$GHCR_TOKEN
+```
+
+Requires:
+
+- [OPA CLI](https://www.openpolicyagent.org/docs/latest/#running-opa)
+- `gooci` (installed automatically by `make policy-push` via `go install`)
+
+## Deploy with Helm
+
+1. Push your bundle (above)
+2. Edit [`values/plugins/custom-policies.yaml`](../values/plugins/custom-policies.yaml) with your `POLICY_IMAGE`
+3. Layer on a plugin overlay:
+
+```bash
+make up \
+  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
   GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org>
 ```
+
+Both upstream and custom bundles are listed under `policies[]` — the agent pulls all of them.
+
+## Writing tests
+
+Add `*_test.rego` files alongside policies:
+
+```rego
+package compliance_framework.my_policy_test
+
+import data.compliance_framework.my_policy as policy
+
+test_compliant if {
+    inp := {"settings": {"some_field": "good"}}
+    count(policy.violation) == 0 with input as inp
+}
+```
+
+Run: `make policy` or `opa test policies/ -v`
+
+## Example: repository baseline
+
+[`custom_repo_baseline.rego`](./custom_repo_baseline.rego) checks GitHub repos for:
+
+- Non-empty description
+- Not archived without process
+- Public visibility unless allow-listed via `policy_data`
+
+See [`custom_repo_baseline_test.rego`](./custom_repo_baseline_test.rego) for test patterns.
+
+## Further reading
+
+- [Plugins & policies guide](../docs/policies-and-plugins.md)
+- [Architecture — plugins vs policies](../docs/architecture.md#plugins-vs-policies-vs-agent)
+- [Helm configuration — agent values](../docs/helm-configuration.md#ccf-agent--agent--plugins)
+- [Upstream example](https://github.com/compliance-framework/plugin-github-repositories-custom-policies)

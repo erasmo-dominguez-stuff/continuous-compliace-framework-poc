@@ -1,5 +1,7 @@
 # Local environment overlay (Docker Desktop Kubernetes).
 #
+# Docs: docs/quickstart.md  |  Helm values: docs/helm-configuration.md
+#
 # Environment config only (resources, persistence, access). Plugins live in
 # values/plugins/ and are layered on top so they can be reused across
 # environments:

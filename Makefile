@@ -1,4 +1,5 @@
-# CCF Helm chart - local (Docker Desktop) & AKS helpers.  Run `make help`.
+# CCF Helm chart - local (Docker Desktop) & AKS helpers.
+# Full documentation: docs/README.md
 #
 # Headline commands:
 #   make up      # start the full CCF stack locally (Docker Desktop)
@@ -68,8 +69,15 @@ SECRET_ARGS += --set ccf-app.api.adminUser.enabled=true
 SECRET_ARGS += --set-string ccf-app.api.adminUser.password=$(ADMIN_PASSWORD)
 endif
 
+# SEED=1 imports a small demo OSCAL dataset (catalog + SSP + plan + results +
+# POA&M) so the UI isn't empty on a fresh install. Off unless requested.
+SEED_ARGS :=
+ifneq ($(strip $(SEED)),)
+SEED_ARGS += --set ccf-app.api.seedData.enabled=true
+endif
+
 # Everything layered after the environment overlay.
-OVERLAY_ARGS := $(PLUGIN_ARGS) $(EXTRA_ARGS) $(SECRET_ARGS)
+OVERLAY_ARGS := $(PLUGIN_ARGS) $(EXTRA_ARGS) $(SECRET_ARGS) $(SEED_ARGS)
 
 # Custom Rego policies (policies/): test/bundle with opa, push with gooci.
 POLICY_DIR    ?= policies

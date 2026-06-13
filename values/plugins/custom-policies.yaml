@@ -1,5 +1,7 @@
 # Reusable overlay: add your OWN custom policies to a plugin.
 #
+# Full guide: docs/policies-and-plugins.md  |  Authoring: policies/README.md
+#
 # CCF policies are Rego bundles distributed over OCI. Author them under
 # policies/, then build and push a bundle:
 #

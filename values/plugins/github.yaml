@@ -1,5 +1,7 @@
 # Reusable plugin overlay: CCF GitHub plugin (plugin-github-repositories).
 #
+# Full guide: docs/policies-and-plugins.md
+#
 # Fetches repository metadata, settings, workflows and supply-chain facts for an
 # organization, then evaluates the bundled OPA/Rego policies against them.
 #

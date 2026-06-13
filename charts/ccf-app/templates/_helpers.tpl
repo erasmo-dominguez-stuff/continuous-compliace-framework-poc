@@ -152,3 +152,20 @@ In-cluster API service DNS name (used by external consumers like the agent).
 {{- define "ccf.api.serviceUrl" -}}
 {{- printf "http://%s:%v" (include "ccf.api.fullname" .) .Values.api.service.port -}}
 {{- end }}
+
+{{/*
+envFrom block (config + DB/JWT secrets) shared by the API deployment and the
+admin/seed Jobs. Render with `{{- include "ccf.api.envFrom" . | nindent N }}`.
+*/}}
+{{- define "ccf.api.envFrom" -}}
+- configMapRef:
+    name: {{ include "ccf.api.fullname" . }}
+{{- if or (not .Values.api.database.existingSecret) .Values.api.jwtSecret }}
+- secretRef:
+    name: {{ include "ccf.api.fullname" . }}
+{{- end }}
+{{- if .Values.api.database.existingSecret }}
+- secretRef:
+    name: {{ .Values.api.database.existingSecret }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,79 @@
+{{- if and .Values.api.enabled .Values.api.seedData.enabled -}}
+{{- $img := printf "%s:%s" .Values.api.image.repository (.Values.api.image.tag | default .Chart.AppVersion) -}}
+{{- $sec := default .Values.securityContext .Values.api.securityContext -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-seed
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-seed") | nindent 4 }}
+  annotations:
+    # Runs after the admin bootstrap (weight 5). Imports the demo OSCAL documents
+    # in dependency order (catalog -> SSP -> assessment plan -> results -> POA&M)
+    # via sequential initContainers; the last import is the main container.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  # Avoid retry storms that would re-import (and duplicate) earlier documents.
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-seed") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ccf.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml (default .Values.podSecurityContext .Values.api.podSecurityContext) | nindent 8 }}
+      initContainers:
+        {{- if .Values.api.migrations.enabled }}
+        - name: migrate
+          image: {{ $img | quote }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/api", "migrate", "up"]
+          securityContext:
+            {{- toYaml $sec | nindent 12 }}
+          envFrom:
+            {{- include "ccf.api.envFrom" . | nindent 12 }}
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+        {{- end }}
+        {{- range $f := list "basic-catalog.json" "goodread_ssp.json" "goodread_ap.json" "goodread_ar.json" }}
+        - name: import-{{ $f | replace "_" "-" | replace ".json" "" | trunc 60 }}
+          image: {{ $img | quote }}
+          imagePullPolicy: {{ $.Values.api.image.pullPolicy }}
+          command: ["/api", "oscal", "import", "-f", "/seed/{{ $f }}"]
+          securityContext:
+            {{- toYaml $sec | nindent 12 }}
+          envFrom:
+            {{- include "ccf.api.envFrom" $ | nindent 12 }}
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+        {{- end }}
+      containers:
+        - name: import-goodread-poam
+          image: {{ $img | quote }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          command: ["/api", "oscal", "import", "-f", "/seed/goodread_poam.json"]
+          securityContext:
+            {{- toYaml $sec | nindent 12 }}
+          envFrom:
+            {{- include "ccf.api.envFrom" . | nindent 12 }}
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+      volumes:
+        - name: seed
+          configMap:
+            name: {{ include "ccf.api.fullname" . }}-seed
+{{- end }}

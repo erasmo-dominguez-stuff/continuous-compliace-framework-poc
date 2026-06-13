@@ -1,0 +1,15 @@
+{{- if and .Values.api.enabled .Values.api.seedData.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-seed
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-seed") | nindent 4 }}
+  annotations:
+    # Must exist before the seed Job hook runs.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  {{- (.Files.Glob "seed/oscal/*.json").AsConfig | nindent 2 }}
+{{- end }}
