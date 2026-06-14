@@ -14,7 +14,7 @@ flowchart TB
     end
 
     subgraph Helm["2 · Configure (Helm)"]
-        VALS["values/plugins/*.yaml"]
+        VALS["values/local.yaml<br/>values/production.yaml"]
         SECRET["ccf-agent Secret<br/>config.yml"]
     end
 
@@ -43,25 +43,25 @@ Official plugins live at https://github.com/orgs/compliance-framework/repositori
 
 Each plugin has a matching `*-policies` repository with upstream Rego bundles.
 
-| Plugin | Overlay in this repo | Use case |
-|--------|----------------------|----------|
-| `plugin-local-ssh` | `values/plugins/local-ssh.yaml` | SSH hardening (needs `sshd` on host — **not** ideal in containers) |
-| `plugin-github-repositories` | `values/plugins/github.yaml` | Org/repo compliance (good for demos) |
-| Custom + upstream | `values/plugins/custom-policies.yaml` | Add your Rego bundle alongside stock policies |
+| Plugin | Configured in | Use case |
+|--------|---------------|----------|
+| `plugin-local-ssh` | `values/local.yaml` | Local demo |
+| `plugin-github-repositories` | `values/production.yaml` | Org/repo compliance (prod) |
+| Custom + upstream | Add to `ccf-agent.config.plugins.*.policies` | Your Rego bundle alongside stock policies |
 
 ### Enable a plugin (Helm)
 
-Layer an overlay on any environment:
+Plugins are defined under `ccf-agent.config.plugins` in each environment overlay.
+
+Production GitHub plugin (token injected at install):
 
 ```bash
-make up PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
 ```
 
-Equivalent raw Helm:
+Equivalent excerpt from `values/production.yaml`:
 
 ```yaml
-# values/plugins/github.yaml (excerpt)
 ccf-agent:
   config:
     plugins:
@@ -73,13 +73,6 @@ ccf-agent:
         config:
           organization: ""
           token: ""
-```
-
-Combine multiple plugin overlays (deep-merge):
-
-```bash
-make up PLUGIN_VALUES="values/plugins/local-ssh.yaml values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
 ```
 
 ### Verify the agent
@@ -181,7 +174,7 @@ Update `POLICY_IMAGE` in the Makefile or pass it on the command line.
 
 ## Step 6 — Reference the bundle in Helm
 
-Edit [`values/plugins/custom-policies.yaml`](../values/plugins/custom-policies.yaml) with your image:
+Add your OCI bundle to `ccf-agent.config.plugins.<name>.policies` in `values/production.yaml`:
 
 ```yaml
 ccf-agent:
@@ -198,9 +191,7 @@ ccf-agent:
 Deploy:
 
 ```bash
-make up \
-  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
 ```
 
 The agent pulls **both** bundles; Rego from all listed policies is evaluated together.
@@ -236,8 +227,7 @@ The GitHub plugin accepts a **bearer token** in `config.token`. GitHub Apps do n
 # Pseudocode: JWT from App private key → installation token
 INSTALL_TOKEN=$(curl ... /app/installations/$ID/access_tokens | jq -r .token)
 
-make up PLUGIN_VALUES=values/plugins/github.yaml \
-  GITHUB_TOKEN=$INSTALL_TOKEN GITHUB_ORG=my-org
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN=$INSTALL_TOKEN GITHUB_ORG=my-org
 ```
 
 Installation tokens expire in ~1 hour. For recurring schedules, automate token refresh or use a fine-grained PAT for demos.

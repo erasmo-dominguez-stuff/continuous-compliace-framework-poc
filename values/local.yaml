@@ -1,17 +1,6 @@
-# Local environment overlay (Docker Desktop Kubernetes).
-#
-# Docs: docs/quickstart.md  |  Helm values: docs/helm-configuration.md
-#
-# Environment config only (resources, persistence, access). Plugins live in
-# values/plugins/ and are layered on top so they can be reused across
-# environments:
-#
-#   helm dependency build .
-#   helm upgrade --install ccf . --kube-context docker-desktop \
-#     -n ccf --create-namespace -f values/local.yaml -f values/plugins/local-ssh.yaml
-#   # or simply: make up
-#
-# Disables persistence and trims resources for laptops.
+# Local overlay — Docker Desktop Kubernetes.
+# Usage: make up && make pf
+# Login: admin@ccf.local / Admin12345!
 
 ccf-app:
   enabled: true
@@ -20,38 +9,37 @@ ccf-app:
     persistence:
       enabled: false
     resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
+      requests: { cpu: 50m, memory: 128Mi }
   api:
     environment: local
     allowedOrigins: "http://localhost:8000,http://localhost:3000"
+    replicaCount: 2
     metrics:
       enabled: true
-    # Out-of-the-box UI login for local dev: a default admin is created on
-    # install via an idempotent Job. Override the password with
-    # `make up ADMIN_PASSWORD=...`; this default is for local use only.
+    pdb:
+      enabled: true
+      minAvailable: 1
     adminUser:
       enabled: true
       email: admin@ccf.local
       firstName: Admin
       lastName: User
       password: "Admin12345!"
-    # Import demo OSCAL on install (catalog + SSP + assessment plan + results +
-    # POA&M) so the UI is not empty. Without this CCF starts with zero OSCAL
-    # content by design. Files: charts/ccf-app/seed/oscal/
     seedData:
       enabled: true
+    agentRegister:
+      enabled: true
+      name: ccf-kubernetes-agent
     resources:
-      requests:
-        cpu: 50m
-        memory: 128Mi
+      requests: { cpu: 50m, memory: 128Mi }
   ui:
     apiUrl: "http://localhost:8080"
+    replicaCount: 2
+    pdb:
+      enabled: true
+      minAvailable: 1
     resources:
-      requests:
-        cpu: 25m
-        memory: 64Mi
+      requests: { cpu: 25m, memory: 64Mi }
   ingress:
     enabled: false
   networkPolicy:
@@ -61,7 +49,18 @@ ccf-agent:
   enabled: true
   fullnameOverride: ccf-agent
   apiUrl: "http://ccf-api:8080"
+  extraEnv:
+    - name: CCF_API_AUTH_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_id
+    - name: CCF_API_AUTH_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_secret
+  auth:
+    waitForRegistration: true
   resources:
-    requests:
-      cpu: 25m
-      memory: 64Mi
+    requests: { cpu: 25m, memory: 64Mi }

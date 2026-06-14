@@ -2,7 +2,7 @@ apiVersion: v2
 name: ccf-agent
 description: |
   Standard CCF agent chart: scheduler/orchestrator for compliance plugins and
-  Rego policy bundles. Deploy one release per estate; layer values/plugins/*.yaml
+  Rego policy bundles. Configure plugins in values/local.yaml or values/production.yaml.
   for GitHub, cloud, or custom collectors. See docs/components.md and
   docs/policies-and-plugins.md.
 type: application

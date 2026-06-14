@@ -1,25 +1,11 @@
-# Standard CCF production profile (umbrella overlay).
-#
-# Use this as the baseline for any non-local deployment. Layer plugin overlays
-# and secrets at install time — never commit credentials to git.
-#
-#   helm dependency build .
-#   helm upgrade --install ccf . -n ccf --create-namespace \
-#     -f values/production.yaml \
-#     -f values/plugins/github.yaml \
-#     --set-string ccf-agent.config.plugins.github_repos.config.token="$GITHUB_TOKEN" \
-#     --set-string ccf-agent.config.plugins.github_repos.config.organization="$GITHUB_ORG" \
-#     --set-string ccf-app.api.adminUser.password="$ADMIN_PASSWORD"
-#
-# For HA PostgreSQL (Bitnami primary + replicas), also layer:
-#   -f values/production-ha.yaml  PG_PASSWORD='...'
-#
-# See docs/production.md for the full runbook.
+# Production overlay — HA control plane, ingress, network policies.
+# Usage:
+#   make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
+# See docs/production.md for required Kubernetes Secrets.
 
 ccf-app:
   enabled: true
   fullnameOverride: ccf
-
   postgres:
     enabled: true
     auth:
@@ -28,11 +14,11 @@ ccf-app:
       database: ccf
     persistence:
       enabled: true
-      storageClass: ""          # CHANGE-ME: backed-up StorageClass
+      storageClass: ""
       size: 20Gi
     resources:
       requests: { cpu: 250m, memory: 512Mi }
-      limits:   { cpu: "1", memory: 1Gi }
+      limits: { cpu: "1", memory: 1Gi }
     podSecurityContext:
       fsGroup: 999
       runAsNonRoot: true
@@ -40,7 +26,6 @@ ccf-app:
     securityContext:
       allowPrivilegeEscalation: false
       capabilities: { drop: ["ALL"] }
-
   api:
     replicaCount: 2
     environment: production
@@ -51,9 +36,12 @@ ccf-app:
       email: admin@your-org.example
       firstName: Admin
       lastName: User
-      password: ""              # inject via --set-string / ADMIN_PASSWORD
+      password: ""
     seedData:
-      enabled: false            # production: import your own OSCAL, not demo seed
+      enabled: false
+    agentRegister:
+      enabled: true
+      name: ccf-kubernetes-agent
     database:
       sslmode: require
       existingSecret: ccf-db-connection
@@ -62,7 +50,7 @@ ccf-app:
       service: true
     resources:
       requests: { cpu: 200m, memory: 256Mi }
-      limits:   { cpu: "1", memory: 512Mi }
+      limits: { cpu: "1", memory: 512Mi }
     autoscaling:
       enabled: true
       minReplicas: 2
@@ -88,12 +76,11 @@ ccf-app:
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/component: api
-
   ui:
     replicaCount: 2
     resources:
       requests: { cpu: 50m, memory: 64Mi }
-      limits:   { cpu: 250m, memory: 128Mi }
+      limits: { cpu: 250m, memory: 128Mi }
     pdb:
       enabled: true
       minAvailable: 1
@@ -106,24 +93,21 @@ ccf-app:
               labelSelector:
                 matchLabels:
                   app.kubernetes.io/component: ui
-
   ingress:
     enabled: true
-    className: nginx                    # CHANGE-ME
+    className: nginx
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-prod
-    uiHost: ccf.example.com             # CHANGE-ME
-    apiHost: api.ccf.example.com        # CHANGE-ME
+    uiHost: ccf.example.com
+    apiHost: api.ccf.example.com
     tls:
       - hosts: [ccf.example.com, api.ccf.example.com]
         secretName: ccf-tls
-
   networkPolicy:
     enabled: true
-    ingressNamespace: ingress-nginx     # CHANGE-ME
+    ingressNamespace: ingress-nginx
     monitoringNamespaceSelector:
       kubernetes.io/metadata.name: observability
-
   tests:
     enabled: true
 
@@ -131,17 +115,29 @@ ccf-agent:
   enabled: true
   fullnameOverride: ccf-agent
   apiUrl: "http://ccf-api:8080"
-  replicaCount: 1                       # one scheduler per cluster/estate; scale out by deploying more agents elsewhere
+  replicaCount: 1
+  extraEnv:
+    - name: CCF_API_AUTH_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_id
+    - name: CCF_API_AUTH_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_secret
+  auth:
+    waitForRegistration: true
   config:
     daemon: true
-    verbosity: 1                        # production: less verbose than local (2)
-    plugins: {}                         # CHANGE-ME: layer values/plugins/*.yaml
+    verbosity: 1
   pdb:
     enabled: true
     minAvailable: 1
   resources:
     requests: { cpu: 100m, memory: 128Mi }
-    limits:   { cpu: 500m, memory: 512Mi }
+    limits: { cpu: 500m, memory: 512Mi }
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 65532
@@ -151,8 +147,3 @@ ccf-agent:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities: { drop: ["ALL"] }
-
-# Built-in Postgres stays on unless you layer production-ha.yaml or point the
-# API at an external database (postgres.enabled=false + api.database.*).
-postgresql:
-  enabled: false

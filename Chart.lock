@@ -5,8 +5,5 @@ dependencies:
 - name: ccf-agent
   repository: file://charts/ccf-agent
   version: 0.1.0
-- name: postgresql
-  repository: oci://registry-1.docker.io/bitnamicharts
-  version: 18.7.3
-digest: sha256:e6bc26af9247fb92ffde241cc3f98d640f5ae1482b901a639b9e7c9b9e63b11e
-generated: "2026-06-11T17:03:09.026737+01:00"
+digest: sha256:ada20ca1b11d9475e90835f1ae2c867c4a96952ae3ede4f5f4b64ed75d93abed
+generated: "2026-06-14T19:32:35.966407+01:00"

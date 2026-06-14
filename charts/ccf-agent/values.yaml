@@ -5,12 +5,26 @@ fullnameOverride: ""
 commonLabels: {}
 imagePullSecrets: []
 
-replicaCount: 1
+images:
+  registry: ghcr.io/compliance-framework
+  pluginRegistry: ghcr.io/compliance-framework
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  agent:
+    repository: agent
+    tag: "0.7.1"
 
 image:
-  repository: ghcr.io/compliance-framework/agent
-  tag: "0.7.1"
-  pullPolicy: IfNotPresent
+  repository: ""
+  tag: ""
+  pullPolicy: ""
+
+auth:
+  # When true, the agent Deployment is a post-install hook (weight 7) so it starts
+  # after ccf-app.api.agentRegister creates the auth Secret (weight 6).
+  waitForRegistration: false
+
+replicaCount: 1
 
 serviceAccount:
   create: true
@@ -34,8 +48,8 @@ args:
 
 # -- Agent configuration rendered to /etc/ccf/config.yml.
 # api.url is injected from .Values.apiUrl when left empty here.
-# Configure plugins below, or layer a reusable overlay from values/plugins/
-# (e.g. values/plugins/local-ssh.yaml, values/plugins/github.yaml).
+# Configure plugins under config.plugins — layer overlays from values/plugins/
+# (local-ssh.yaml, github.yaml, custom-policies.yaml). See values/plugins/README.md.
 config:
   daemon: true
   verbosity: 2
@@ -70,27 +84,10 @@ pdb:
   enabled: false
   minAvailable: 1
 
-# Agent has no HTTP health endpoint; exec probes verify the scheduler process.
-livenessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - pgrep -f 'concom agent' >/dev/null
-  initialDelaySeconds: 30
-  periodSeconds: 30
-  timeoutSeconds: 5
-  failureThreshold: 3
-readinessProbe:
-  exec:
-    command:
-      - sh
-      - -c
-      - test -f /etc/ccf/config.yml && pgrep -f 'concom agent' >/dev/null
-  initialDelaySeconds: 10
-  periodSeconds: 15
-  timeoutSeconds: 5
-  failureThreshold: 3
+# The agent image is distroless (no shell). Probes are off by default; the
+# scheduler is monitored via logs/heartbeats in the API. Do not use exec+sh probes.
+livenessProbe: {}
+readinessProbe: {}
 
 resources: {}
 nodeSelector: {}

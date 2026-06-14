@@ -20,9 +20,9 @@
 #   make pf-aks                 # port-forward against the current (AKS) context
 #
 # Optional add-ons (any environment):
-#   GITHUB plugin:  make up PLUGIN_VALUES="values/plugins/local-ssh.yaml values/plugins/github.yaml" \
-#                     GITHUB_TOKEN=... GITHUB_ORG=...
-#   HA Postgres:    make up EXTRA_VALUES="values/postgres-ha.yaml" PG_PASSWORD=...
+#   GitHub plugin:  PLUGIN_VALUES=values/plugins/github.yaml GITHUB_TOKEN=... GITHUB_ORG=...
+#   Custom policies: PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml"
+#   Load test:        make pf && make loadtest-smoke
 
 NAMESPACE     ?= ccf
 OBS_NAMESPACE ?= observability
@@ -37,34 +37,37 @@ HELM_CTX     := --kube-context $(KUBE_CONTEXT)
 KUBECTL      := kubectl --context $(KUBE_CONTEXT)
 
 # ---------------------------------------------------------------- values layout
-# Environment overlays live in values/, plugin overlays in values/plugins/.
-# Layered: environment first, then one or more reusable plugin overlays.
+# Three environment overlays only: local, aks (smoke test), production.
 ENV_LOCAL ?= values/local.yaml
 ENV_AKS   ?= values/aks.yaml
 ENV_PROD  ?= values/production.yaml
 
-# Space-separated list of plugin overlays to layer on top (override freely).
-PLUGIN_VALUES ?= values/plugins/local-ssh.yaml
-PLUGIN_ARGS   := $(foreach f,$(PLUGIN_VALUES),-f $(f))
-
-# Free-form overlays layered last (e.g. values/postgres-ha.yaml).
-EXTRA_VALUES ?=
-EXTRA_ARGS   := $(foreach f,$(EXTRA_VALUES),-f $(f))
+# Plugin overlays (OCI plugin + policy config for ccf-agent). Space-separated.
+# Defaults: local-ssh for up/aks, github for prod (see targets below).
+PLUGIN_VALUES ?=
+PROD_PLUGIN_VALUES ?= values/plugins/github.yaml
+DEFAULT_PLUGIN_VALUES ?= values/plugins/local-ssh.yaml
+PLUGIN_ARGS = $(foreach f,$(if $(strip $(PLUGIN_VALUES)),$(PLUGIN_VALUES),$(DEFAULT_PLUGIN_VALUES)),-f $(f))
+PROD_PLUGIN_ARGS = $(foreach f,$(if $(strip $(PLUGIN_VALUES)),$(PLUGIN_VALUES),$(PROD_PLUGIN_VALUES)),-f $(f))
 
 # Optional secrets, injected only when provided so they never land in git:
 #   GITHUB_TOKEN / GITHUB_ORG  -> GitHub plugin credentials
-#   PG_PASSWORD                -> official (Bitnami) Postgres password
 #   ADMIN_PASSWORD             -> default UI admin (also enables the bootstrap)
+#   REGISTRY_PREFIX            -> mirror all images (sets ccf-app/ccf-agent images.registry)
+REGISTRY_PREFIX ?=
+IMAGE_ARGS :=
+ifneq ($(strip $(REGISTRY_PREFIX)),)
+IMAGE_ARGS += --set ccf-app.images.registry=$(REGISTRY_PREFIX)
+IMAGE_ARGS += --set ccf-app.images.pluginRegistry=$(REGISTRY_PREFIX)
+IMAGE_ARGS += --set ccf-agent.images.registry=$(REGISTRY_PREFIX)
+IMAGE_ARGS += --set ccf-agent.images.pluginRegistry=$(REGISTRY_PREFIX)
+endif
 SECRET_ARGS :=
 ifneq ($(strip $(GITHUB_TOKEN)),)
 SECRET_ARGS += --set-string ccf-agent.config.plugins.github_repos.config.token=$(GITHUB_TOKEN)
 endif
 ifneq ($(strip $(GITHUB_ORG)),)
 SECRET_ARGS += --set-string ccf-agent.config.plugins.github_repos.config.organization=$(GITHUB_ORG)
-endif
-ifneq ($(strip $(PG_PASSWORD)),)
-SECRET_ARGS += --set-string postgresql.auth.password=$(PG_PASSWORD)
-SECRET_ARGS += --set-string ccf-app.postgres.auth.password=$(PG_PASSWORD)
 endif
 ifneq ($(strip $(ADMIN_PASSWORD)),)
 SECRET_ARGS += --set ccf-app.api.adminUser.enabled=true
@@ -79,7 +82,16 @@ SEED_ARGS += --set ccf-app.api.seedData.enabled=true
 endif
 
 # Everything layered after the environment overlay.
-OVERLAY_ARGS := $(PLUGIN_ARGS) $(EXTRA_ARGS) $(SECRET_ARGS) $(SEED_ARGS)
+OVERLAY_ARGS := $(PLUGIN_ARGS) $(SECRET_ARGS) $(SEED_ARGS) $(IMAGE_ARGS)
+PROD_OVERLAY_ARGS := $(PROD_PLUGIN_ARGS) $(SECRET_ARGS) $(SEED_ARGS) $(IMAGE_ARGS)
+
+# k6 load tests (see loadtest/README.md)
+LOADTEST_BASE_URL     ?= http://localhost:8080
+LOADTEST_ADMIN_EMAIL  ?= admin@ccf.local
+LOADTEST_ADMIN_PASSWORD ?= Admin12345!
+
+# Headless Chrome for docs/screenshots (macOS default path)
+CHROME ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 
 # Custom Rego policies (policies/): test/bundle with opa, push with gooci.
 POLICY_DIR    ?= policies
@@ -101,7 +113,7 @@ help: ## Show this help
 up: deps docker-ensure ## Start the full CCF stack locally on Docker Desktop (then `make pf`)
 	helm upgrade --install $(RELEASE) $(CHART_DIR) $(HELM_CTX) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f $(ENV_LOCAL) $(OVERLAY_ARGS) --wait --timeout 5m
+		-f $(ENV_LOCAL) $(OVERLAY_ARGS) --wait --timeout 8m
 	@$(MAKE) --no-print-directory status
 	@echo ""
 	@echo "CCF is up on '$(KUBE_CONTEXT)'. Expose it with:  make pf"
@@ -176,18 +188,14 @@ aks: deps ## (AKS) Install CCF on the CURRENT kube-context with the aks overlay
 		-f $(ENV_AKS) $(OVERLAY_ARGS) --wait --timeout 8m
 	@echo "Expose it with:  make pf-aks   then open http://localhost:8000"
 
-.PHONY: install-aks
-install-aks: aks # Backwards-compatible alias for `make aks`
-
 .PHONY: prod
-prod: deps ## Production CCF on current kube-context (values/production.yaml + optional overlays)
+prod: deps ## Production CCF on current kube-context (values/production.yaml)
 	@test -n "$(ADMIN_PASSWORD)" || { echo "ADMIN_PASSWORD is required. Create K8s Secrets first — see docs/production.md"; exit 1; }
-	@test -n "$(strip $(PLUGIN_VALUES))" && test "$(PLUGIN_VALUES)" != "values/plugins/local-ssh.yaml" || \
-		{ echo "WARNING: production agent needs at least one plugin overlay (PLUGIN_VALUES=values/plugins/github.yaml)"; }
+	@test -n "$(GITHUB_TOKEN)" || { echo "WARNING: GITHUB_TOKEN not set — GitHub plugin will not collect data"; }
 	@echo "Deploying production profile to: $$(kubectl config current-context)"
 	helm upgrade --install $(RELEASE) $(CHART_DIR) \
 		--namespace $(NAMESPACE) --create-namespace \
-		-f $(ENV_PROD) $(OVERLAY_ARGS) --wait --timeout 10m
+		-f $(ENV_PROD) $(PROD_OVERLAY_ARGS) --wait --timeout 10m
 	@echo "Production CCF installed. Next: make obs && make pf-aks  (or configure ingress in values/production.yaml)"
 
 ## ---------------------------------------------------------------- build & test
@@ -201,38 +209,33 @@ lint: # helm lint umbrella + subcharts
 	helm lint $(CHART_DIR)/charts/ccf-app
 	helm lint $(CHART_DIR)/charts/ccf-agent
 
+.PHONY: check
+check: validate ## Quick offline check (lint + render all overlays)
+
 .PHONY: validate
 validate: deps lint template-all ## Offline validation: lint + render every env/plugin combo
-	@echo "OK: charts lint and every environment x plugin overlay renders."
+	@echo "OK: charts lint and all environment overlays render."
 
 .PHONY: template-all
-template-all: deps # Render every environment x plugin overlay combination (no cluster)
+template-all: deps # Render env + plugin overlay combinations (no cluster)
 	@set -e; \
 	for env in $(ENV_LOCAL) $(ENV_AKS); do \
-		echo "--- $$env (base) ---"; \
-		helm template $(RELEASE) $(CHART_DIR) -f $$env >/dev/null; \
-		for plugin in values/plugins/*.yaml; do \
-			echo "--- $$env + $$plugin ---"; \
-			helm template $(RELEASE) $(CHART_DIR) -f $$env -f $$plugin \
-				--set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
-				--set-string ccf-agent.config.plugins.github_repos.config.organization=dummy >/dev/null; \
-		done; \
-		echo "--- $$env + values/postgres-ha.yaml ---"; \
-		helm template $(RELEASE) $(CHART_DIR) -f $$env -f values/postgres-ha.yaml \
-			--set-string postgresql.auth.password=dummy \
-			--set-string ccf-app.postgres.auth.password=dummy >/dev/null; \
+		echo "--- $$env + $(DEFAULT_PLUGIN_VALUES) ---"; \
+		helm template $(RELEASE) $(CHART_DIR) -f $$env -f $(DEFAULT_PLUGIN_VALUES) \
+			--set-string ccf-app.api.adminUser.password=dummy >/dev/null; \
 	done; \
-	for prod in values/production.yaml values/production-ha.yaml; do \
-		echo "--- $$prod (base) ---"; \
-		helm template $(RELEASE) $(CHART_DIR) -f $$prod \
-			--set-string ccf-app.api.adminUser.password=dummy \
-			--set-string postgresql.auth.password=dummy >/dev/null; \
-		echo "--- values/aks.yaml + $$prod ---"; \
-		helm template $(RELEASE) $(CHART_DIR) -f values/aks.yaml -f $$prod \
-			--set-string ccf-app.api.adminUser.password=dummy \
-			--set-string postgresql.auth.password=dummy >/dev/null; \
-	done; \
-	echo "all combinations rendered successfully"
+	echo "--- $(ENV_PROD) + $(PROD_PLUGIN_VALUES) ---"; \
+	helm template $(RELEASE) $(CHART_DIR) -f $(ENV_PROD) -f $(PROD_PLUGIN_VALUES) \
+		--set-string ccf-app.api.adminUser.password=dummy \
+		--set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
+		--set-string ccf-agent.config.plugins.github_repos.config.organization=dummy >/dev/null; \
+	echo "--- $(ENV_PROD) + github + custom-policies ---"; \
+	helm template $(RELEASE) $(CHART_DIR) -f $(ENV_PROD) \
+		-f values/plugins/github.yaml -f values/plugins/custom-policies.yaml \
+		--set-string ccf-app.api.adminUser.password=dummy \
+		--set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
+		--set-string ccf-agent.config.plugins.github_repos.config.organization=dummy >/dev/null; \
+	echo "all overlays rendered successfully"
 
 .PHONY: smoke
 smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
@@ -245,6 +248,34 @@ smoke: ## Post-deploy smoke test: wait for rollouts, then run helm tests
 .PHONY: test
 test: # Run helm test hooks (in-cluster API/UI connectivity)
 	helm test $(RELEASE) -n $(NAMESPACE) $(HELM_CTX) --logs
+
+.PHONY: screenshots
+screenshots: ## Re-capture docs/images/*.png (requires `make pf-all` running)
+	@command -v "$(CHROME)" >/dev/null 2>&1 || { echo "Set CHROME to your Chrome binary path"; exit 1; }
+	@mkdir -p docs/images
+	$(CHROME) --headless=new --disable-gpu --window-size=1440,900 \
+		--screenshot=docs/images/ccf-ui-login.png http://localhost:8000
+	$(CHROME) --headless=new --disable-gpu --window-size=1440,900 \
+		--screenshot=docs/images/ccf-swagger.png http://localhost:8080/swagger/index.html
+	$(CHROME) --headless=new --disable-gpu --window-size=1440,900 \
+		--screenshot=docs/images/grafana-login.png http://localhost:3000/login
+	$(CHROME) --headless=new --disable-gpu --window-size=1440,900 \
+		--screenshot=docs/images/prometheus-targets.png http://localhost:9091/targets
+	@echo "Screenshots written to docs/images/"
+
+.PHONY: loadtest-smoke
+loadtest-smoke: ## k6 smoke test (needs API at LOADTEST_BASE_URL, e.g. after `make pf`)
+	@command -v k6 >/dev/null 2>&1 || { echo "Install k6: https://grafana.com/docs/k6/latest/set-up/install-k6/"; exit 1; }
+	BASE_URL=$(LOADTEST_BASE_URL) ADMIN_EMAIL=$(LOADTEST_ADMIN_EMAIL) \
+		ADMIN_PASSWORD=$(LOADTEST_ADMIN_PASSWORD) \
+		k6 run loadtest/api-smoke.js
+
+.PHONY: loadtest
+loadtest: ## k6 API load test (see loadtest/README.md)
+	@command -v k6 >/dev/null 2>&1 || { echo "Install k6: https://grafana.com/docs/k6/latest/set-up/install-k6/"; exit 1; }
+	BASE_URL=$(LOADTEST_BASE_URL) ADMIN_EMAIL=$(LOADTEST_ADMIN_EMAIL) \
+		ADMIN_PASSWORD=$(LOADTEST_ADMIN_PASSWORD) \
+		k6 run loadtest/api-load.js
 
 ## ---------------------------------------------------------------- custom policies
 .PHONY: policy
@@ -273,19 +304,6 @@ policy-push: policy-build ## Build & push the policy bundle to an OCI registry (
 	gooci upload-single $(POLICY_BUNDLE) $(POLICY_IMAGE)
 	@echo "pushed $(POLICY_IMAGE)"
 
-## ---------------------------------------------------------------- standalone charts
-.PHONY: install-app
-install-app: deps # Install ccf-app standalone (production values)
-	helm upgrade --install ccf-app $(CHART_DIR)/charts/ccf-app $(HELM_CTX) \
-		--namespace $(NAMESPACE) --create-namespace \
-		-f $(CHART_DIR)/charts/ccf-app/values-production.yaml
-
-.PHONY: install-agent
-install-agent: # Install ccf-agent standalone (production values)
-	helm upgrade --install ccf-agent $(CHART_DIR)/charts/ccf-agent $(HELM_CTX) \
-		--namespace $(NAMESPACE) --create-namespace \
-		-f $(CHART_DIR)/charts/ccf-agent/values-production.yaml
-
 ## ---------------------------------------------------------------- observability (internals)
 .PHONY: obs-repos
 obs-repos: # Add Grafana/Prometheus helm repos
@@ -307,9 +325,6 @@ obs-stack: obs-repos # Install Loki + Prometheus + Grafana (pre-provisioned) for
 		--set chunksCache.enabled=false --set resultsCache.enabled=false
 	helm upgrade --install prometheus prometheus-community/prometheus $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \
-		--set server.extraFlags="{web.enable-remote-write-receiver}" \
-		--set alertmanager.enabled=false \
-		--set prometheus-pushgateway.enabled=false \
 		-f observability/prometheus-values.yaml
 	helm upgrade --install ccf-grafana grafana/grafana $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \

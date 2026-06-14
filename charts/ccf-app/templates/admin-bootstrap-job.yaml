@@ -21,9 +21,9 @@ spec:
         {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-admin-bootstrap") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
-      {{- with .Values.imagePullSecrets }}
+      {{- with include "ccf.imagePullSecrets" . }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "ccf.serviceAccountName" . }}
       securityContext:
@@ -32,8 +32,8 @@ spec:
       # Guarantee the schema exists even if the API pod isn't ready yet.
       initContainers:
         - name: migrate
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          image: {{ include "ccf.image.ref" (dict "root" . "component" "api" "image" .Values.api.image "defaultTag" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ include "ccf.image.pullPolicy" (dict "root" . "image" .Values.api.image) }}
           command: ["/api", "migrate", "up"]
           securityContext:
             {{- toYaml (default .Values.securityContext .Values.api.securityContext) | nindent 12 }}
@@ -51,8 +51,8 @@ spec:
       {{- end }}
       containers:
         - name: create-admin
-          image: "{{ .Values.api.image.repository }}:{{ .Values.api.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          image: {{ include "ccf.image.ref" (dict "root" . "component" "api" "image" .Values.api.image "defaultTag" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ include "ccf.image.pullPolicy" (dict "root" . "image" .Values.api.image) }}
           securityContext:
             {{- toYaml (default .Values.securityContext .Values.api.securityContext) | nindent 12 }}
           command: ["/api", "users", "add"]

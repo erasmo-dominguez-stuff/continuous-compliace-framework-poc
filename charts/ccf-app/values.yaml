@@ -9,7 +9,24 @@ fullnameOverride: ""
 commonLabels: {}
 
 # -- Secrets used to pull images from private registries, e.g. [{name: regcred}]
+# Also set global.imagePullSecrets on the umbrella chart for all subcharts.
 imagePullSecrets: []
+
+# Central image settings — change `registry` and tags for private mirrors (Artifactory, ACR, …).
+images:
+  registry: ghcr.io/compliance-framework
+  pluginRegistry: ghcr.io/compliance-framework
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+  api:
+    repository: api
+    tag: ""
+  ui:
+    repository: ui
+    tag: "2.9.1"
+  postgres:
+    repository: pg-ccf
+    tag: "0.0.5"
 
 serviceAccount:
   create: true
@@ -46,9 +63,9 @@ networkPolicy:
 postgres:
   enabled: true
   image:
-    repository: ghcr.io/compliance-framework/pg-ccf
-    tag: "0.0.5"
-    pullPolicy: IfNotPresent
+    repository: ""
+    tag: ""
+    pullPolicy: ""
   auth:
     username: postgres
     # -- Database password. Change for any non-local deployment.
@@ -77,11 +94,11 @@ postgres:
 # ---------------------------------------------------------------------------
 api:
   enabled: true
-  replicaCount: 1
+  replicaCount: 2
   image:
-    repository: ghcr.io/compliance-framework/api
-    tag: ""  # defaults to .Chart.AppVersion when empty
-    pullPolicy: IfNotPresent
+    repository: ""
+    tag: ""
+    pullPolicy: ""
   environment: production
   allowedOrigins: ""
   # Run `migrate up` as an init container so the DB schema exists before the API
@@ -111,6 +128,15 @@ api:
   # import`). Idempotent enough for demos; re-running may create duplicates.
   seedData:
     enabled: false
+  # Register an agent in Admin → Agents and create a service-account key for the
+  # ccf-agent Deployment (populates the UI + wires CCF_API_AUTH_*). Requires
+  # api.adminUser.enabled. Idempotent on upgrade.
+  agentRegister:
+    enabled: false
+    name: ccf-kubernetes-agent
+    keyName: default
+    # Secret holding client_id / client_secret (created by the hook Job).
+    secretName: ""
   database:
     driver: postgres
     sslmode: disable
@@ -132,7 +158,7 @@ api:
     service: true
   podAnnotations: {}
   pdb:
-    enabled: false
+    enabled: true
     minAvailable: 1
   dataVolume:
     enabled: true
@@ -161,7 +187,15 @@ api:
     targetCPUUtilizationPercentage: 80
   nodeSelector: {}
   tolerations: []
-  affinity: {}
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
   podSecurityContext: {}
   securityContext: {}
 
@@ -170,12 +204,11 @@ api:
 # ---------------------------------------------------------------------------
 ui:
   enabled: true
-  replicaCount: 1
+  replicaCount: 2
   image:
-    repository: ghcr.io/compliance-framework/ui
-    # 2.9.1 is the upstream known-good UI for API 0.16.0.
-    tag: "2.9.1"
-    pullPolicy: IfNotPresent
+    repository: ""
+    tag: ""
+    pullPolicy: ""
   apiUrl: ""
   service:
     type: ClusterIP
@@ -195,12 +228,20 @@ ui:
     periodSeconds: 10
   podAnnotations: {}
   pdb:
-    enabled: false
+    enabled: true
     minAvailable: 1
   resources: {}
   nodeSelector: {}
   tolerations: []
-  affinity: {}
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: ui
   podSecurityContext: {}
   securityContext: {}
 

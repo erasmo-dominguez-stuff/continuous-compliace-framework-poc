@@ -16,9 +16,7 @@ This repo is the **reference Helm distribution** for CCF on Kubernetes:
 
 | File | Use when |
 |------|----------|
-| [`values/production.yaml`](../values/production.yaml) | Standard production (bundled Postgres with persistence) |
-| [`values/production-ha.yaml`](../values/production-ha.yaml) | Production + Bitnami PostgreSQL HA |
-| [`charts/ccf-agent/values-production.yaml`](../charts/ccf-agent/values-production.yaml) | Hardened agent defaults |
+| [`values/production.yaml`](../values/production.yaml) | Standard production (bundled Postgres, GitHub plugin, agent register) |
 
 ---
 
@@ -45,43 +43,26 @@ flowchart TD
 
 ---
 
-## Deploy on AKS (example)
+## Deploy (example)
 
 ```bash
-# 1. Secrets (example — use your secret manager in real prod)
+# 1. Secrets — see "Required secrets" below
 kubectl create namespace ccf
-kubectl create secret generic ccf-postgres-credentials -n ccf \
-  --from-literal=POSTGRES_USER=ccf \
-  --from-literal=POSTGRES_PASSWORD="$(openssl rand -base64 24)" \
-  --from-literal=POSTGRES_DB=ccf
+# ... create ccf-postgres-credentials, ccf-db-connection, etc.
 
-# API connection string + JWT (keys expected by the API Deployment)
-kubectl create secret generic ccf-db-connection -n ccf \
-  --from-literal=CCF_DB_CONNECTION="host=ccf-postgres user=ccf password=REPLACE dbname=ccf port=5432 sslmode=require" \
-  --from-literal=CCF_JWT_SECRET="$(openssl rand -base64 32)"
+# 2. Deploy
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
 
-kubectl create secret generic ccf-admin-credentials -n ccf \
-  --from-literal=email=admin@yourcompany.com \
-  --from-literal=password="$(openssl rand -base64 16)"
-
-# 2. Plugin token (example: GitHub)
-export GITHUB_TOKEN="ghp_..."
-
-# 3. Deploy
-make aks \
-  VALUES="-f values/aks.yaml -f values/production.yaml -f values/production-ha.yaml \
-          -f values/plugins/github.yaml" \
-  GITHUB_TOKEN="$GITHUB_TOKEN"
-
-# 4. Observability (separate namespace)
+# 3. Observability
 make obs
 
-# 5. Validate
-make validate
-make smoke
+# 4. Validate
+make validate && make smoke && make loadtest-smoke   # needs make pf for k6
 ```
 
-For non-AKS clusters, use `helm upgrade --install` directly with the same value files and your kube-context.
+For AKS **smoke test only** (not full prod): `make aks ADMIN_PASSWORD='...'`
+
+For non-AKS clusters, use `helm upgrade --install` with `-f values/production.yaml` and your kube-context.
 
 ---
 
@@ -224,7 +205,7 @@ kubectl logs -n ccf deploy/ccf-api --tail=100
 kubectl exec -n ccf ccf-postgres-0 -- pg_dump -U ccf ccf > ccf-backup-$(date +%F).sql
 ```
 
-For HA Bitnami chart, follow Bitnami backup docs or use managed PostgreSQL with automated backups.
+Use managed PostgreSQL with automated backups for production-grade HA.
 
 ### Upgrade procedure
 

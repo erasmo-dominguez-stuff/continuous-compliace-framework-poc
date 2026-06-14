@@ -29,7 +29,8 @@ flowchart LR
 
 | Guide | Topics |
 |-------|--------|
-| [**Quick start**](./docs/quickstart.md) | Local demo, GitHub demo, AKS, observability, smoke tests |
+| [Quick start](./docs/quickstart.md) | Local demo, AKS smoke test, observability, load tests |
+| [**Setup evidence**](./docs/setup-evidence.md) | Screenshots: UI, Grafana, Prometheus, validation checklist |
 | [**Components explained**](./docs/components.md) | What each CCF piece is (API, agent, plugin, policy, OSCAL, …) |
 | [**Production deployment**](./docs/production.md) | Standard prod profile, reliability, secrets, alerts, runbook |
 | [**Architecture**](./docs/architecture.md) | How CCF, agent, plugins, policies, and OSCAL fit together |
@@ -50,6 +51,7 @@ make pf-all      # port-forward UI, API, Grafana, Prometheus, Loki
 make aks         # CCF on AKS (current kube-context)
 make policy      # validate + test custom Rego policies
 make validate    # offline helm lint + render all overlays
+make loadtest    # k6 API load test (after make pf)
 make down        # uninstall CCF
 ```
 
@@ -72,16 +74,15 @@ ccf/                       umbrella (single-command install)
 
 | Profile | Values file | Use case |
 |---------|-------------|----------|
-| Local demo | `values/local.yaml` | Docker Desktop, seed OSCAL, port-forward |
-| Cloud base | `values/aks.yaml` | AKS / generic cloud tweaks |
-| **Production** | `values/production.yaml` | HA, PDB, HPA, ingress, networkPolicy, metrics |
-| **Production HA DB** | `values/production-ha.yaml` | Bitnami PostgreSQL replication |
+| Local demo | `values/local.yaml` | Docker Desktop, seed OSCAL, agent register, port-forward |
+| AKS smoke test | `values/aks.yaml` | Minimal Azure validation |
+| **Production** | `values/production.yaml` | HA, PDB, HPA, ingress, GitHub plugin |
 
 ```bash
 # Production (Secrets required first — see docs/production.md)
-make prod ADMIN_PASSWORD='...' PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=... GITHUB_ORG=...
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN=... GITHUB_ORG=...
 make obs    # Loki + Prometheus alerts + Grafana dashboard
+make loadtest-smoke   # k6 API smoke (after make pf)
 ```
 
 | Component | Image | Purpose |
@@ -91,22 +92,40 @@ make obs    # Loki + Prometheus alerts + Grafana dashboard
 | UI | `ghcr.io/compliance-framework/ui:2.9.1` | Web frontend |
 | Agent | `ghcr.io/compliance-framework/agent:0.7.1` | Runs plugins on schedule |
 
-Deploy subcharts independently for production — see [Helm configuration](./docs/helm-configuration.md#production-install-subcharts).
+See [Production deployment](./docs/production.md) for the production profile.
 
 ## Values layout
+
+**Image registry and tags** — defaults live in each subchart (`charts/ccf-app/values.yaml`, `charts/ccf-agent/values.yaml` → `images.registry`, `images.*.tag`). Mirror with `make up REGISTRY_PREFIX=your.registry/...` or override per component.
 
 Layer environment + plugins + optional overlays:
 
 ```
-values.yaml                  umbrella defaults
-values/local.yaml            Docker Desktop
-values/aks.yaml              AKS / cloud base
-values/production.yaml       standard production profile
-values/production-ha.yaml      production + Bitnami HA Postgres
-values/postgres-ha.yaml      Bitnami HA Postgres + app HA
-values/plugins/              reusable plugin configs
+values.yaml                  umbrella defaults (enable subcharts)
+values/local.yaml            Docker Desktop demo
+values/aks.yaml              AKS smoke test
+values/production.yaml       production profile
+values/plugins/              plugin + custom policy overlays (see README there)
+loadtest/                    k6 API smoke + load tests
+docs/images/                 setup screenshots
 policies/                    custom Rego (author → bundle → OCI)
 observability/               Grafana + Alloy + Prometheus alert rules
+```
+
+Image defaults (change in subchart values or override at install):
+
+```yaml
+# charts/ccf-app/values.yaml
+images:
+  registry: ghcr.io/compliance-framework
+  api:    { repository: api, tag: "" }      # tag defaults to Chart appVersion
+  ui:     { repository: ui, tag: "2.9.1" }
+  postgres: { repository: pg-ccf, tag: "0.0.5" }
+
+# charts/ccf-agent/values.yaml
+images:
+  registry: ghcr.io/compliance-framework
+  agent:  { repository: agent, tag: "0.7.1" }
 ```
 
 Umbrella keys are prefixed: `ccf-app.api.*`, `ccf-agent.config.plugins.*`.
@@ -126,19 +145,10 @@ helm dependency build .
 helm upgrade --install ccf . \
   --kube-context docker-desktop \
   --namespace ccf --create-namespace \
-  -f values/local.yaml \
-  -f values/plugins/local-ssh.yaml
+  -f values/local.yaml
 ```
 
-Secrets (GitHub token, admin password, DB password) — inject at install time; see [Makefile variables](./docs/makefile-reference.md#variables).
-
-## GitOps
-
-Argo CD manifests in [`argocd/`](./argocd/):
-
-```bash
-kubectl apply -n argocd -f argocd/root-application.yaml
-```
+Secrets (GitHub token, admin password) — inject at install time; see [Makefile reference](./docs/makefile-reference.md).
 
 ## Uninstall
 

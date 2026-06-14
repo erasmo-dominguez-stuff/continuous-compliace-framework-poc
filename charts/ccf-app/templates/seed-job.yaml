@@ -1,5 +1,5 @@
 {{- if and .Values.api.enabled .Values.api.seedData.enabled -}}
-{{- $img := printf "%s:%s" .Values.api.image.repository (.Values.api.image.tag | default .Chart.AppVersion) -}}
+{{- $img := include "ccf.image.ref" (dict "root" . "component" "api" "image" .Values.api.image "defaultTag" .Chart.AppVersion) -}}
 {{- $sec := default .Values.securityContext .Values.api.securityContext -}}
 apiVersion: batch/v1
 kind: Job
@@ -23,9 +23,9 @@ spec:
         {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-seed") | nindent 8 }}
     spec:
       restartPolicy: Never
-      {{- with .Values.imagePullSecrets }}
+      {{- with include "ccf.imagePullSecrets" . }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "ccf.serviceAccountName" . }}
       securityContext:

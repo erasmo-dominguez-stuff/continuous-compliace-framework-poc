@@ -9,67 +9,94 @@ flowchart TB
     UMB["ccf/ umbrella chart"]
     APP["ccf-app/<br/>PostgreSQL + API + UI"]
     AGT["ccf-agent/<br/>plugin scheduler"]
-    BIT["postgresql/ Bitnami<br/>(optional · postgres-ha.yaml)"]
 
     UMB --> APP
     UMB --> AGT
-    UMB -.->|"postgresql.enabled=true"| BIT
-    BIT -.->|"api.database.host"| APP
 ```
 
 ### Values namespacing
 
 | Install target | Values prefix | Example |
 |----------------|---------------|---------|
-| Umbrella `ccf` | `ccf-app.*`, `ccf-agent.*`, `postgresql.*` | `ccf-app.api.replicaCount: 2` |
+| Umbrella `ccf` | `ccf-app.*`, `ccf-agent.*` | `ccf-app.api.replicaCount: 2` |
 | Subchart `ccf-app` | top-level keys | `api.replicaCount: 2` |
 | Subchart `ccf-agent` | top-level keys | `config.plugins.github_repos...` |
 
 Helm **deep-merges** multiple `-f` files. Later files override earlier keys.
 
-### Values layering (merge order)
+## Image registry and tags
+
+Component images are configured **in each subchart** — no separate mirror file.
+
+| Chart | Values path | Default |
+|-------|-------------|---------|
+| `ccf-app` | `images.registry`, `images.api/ui/postgres.*` | `ghcr.io/compliance-framework/...` |
+| `ccf-agent` | `images.registry`, `images.agent.*` | `ghcr.io/compliance-framework/agent:0.7.1` |
+
+Plugin OCI refs in agent config keep upstream paths; the agent chart rewrites them when `images.pluginRegistry` (or `images.registry`) differs.
+
+```yaml
+# Mirror everything to Artifactory (umbrella install)
+ccf-app:
+  images:
+    registry: artifactory.example.com/docker-remote/compliance-framework
+    pluginRegistry: artifactory.example.com/docker-remote/compliance-framework
+ccf-agent:
+  images:
+    registry: artifactory.example.com/docker-remote/compliance-framework
+    pluginRegistry: artifactory.example.com/docker-remote/compliance-framework
+```
+
+Or one Makefile flag:
+
+```bash
+make up REGISTRY_PREFIX=artifactory.example.com/docker-remote/compliance-framework
+```
+
+Per-component override:
+
+```yaml
+ccf-app:
+  api:
+    image:
+      repository: my.registry.example.com/custom/ccf-api
+      tag: "0.16.0"
+```
+
+### Values layering
 
 ```mermaid
 flowchart LR
     V0["values.yaml<br/>umbrella defaults"]
-    V1["values/local.yaml<br/>or aks.yaml"]
-    V2["values/plugins/*.yaml"]
-    V3["values/postgres-ha.yaml<br/>(optional)"]
-    V4["--set-string secrets<br/>ADMIN_PASSWORD · GITHUB_TOKEN · PG_PASSWORD"]
-    V5["SEED=1<br/>(optional)"]
+    V1["values/local.yaml<br/>values/aks.yaml<br/>values/production.yaml"]
+    V2["--set-string secrets<br/>ADMIN_PASSWORD · GITHUB_TOKEN"]
+    V3["REGISTRY_PREFIX<br/>SEED=1<br/>(optional)"]
 
-    V0 --> V1 --> V2 --> V3 --> V4 --> V5
-    V5 --> HELM["helm upgrade --install ccf ."]
+    V0 --> V1 --> V2 --> V3
+    V3 --> HELM["helm upgrade --install ccf ."]
 ```
 
-## Values layering strategy
+**Three environment overlays** — plugins in `values/plugins/` layered via `PLUGIN_VALUES`:
 
-Recommended order (first → last):
+| File | Command | Contents |
+|------|---------|----------|
+| `values/local.yaml` | `make up` | Demo admin, seed, agent register |
+| `values/aks.yaml` | `make aks` | AKS smoke test |
+| `values/production.yaml` | `make prod` | HA, ingress, networkPolicy |
 
-1. **Environment** — `values/local.yaml` or `values/aks.yaml`
-2. **Plugin overlays** — one or more files from `values/plugins/`
-3. **Optional overlays** — `values/postgres-ha.yaml`, custom files
-4. **Secrets at install time** — `--set-string` / Makefile variables (never commit)
+| Plugin overlay | Default for |
+|----------------|-------------|
+| `values/plugins/local-ssh.yaml` | `make up`, `make aks` |
+| `values/plugins/github.yaml` | `make prod` |
+| `values/plugins/custom-policies.yaml` | Optional — layer after `github.yaml` |
 
-### Example: local with GitHub plugin
+See [values/plugins/README.md](../values/plugins/README.md).
 
-```bash
-helm dependency build .
-
-helm upgrade --install ccf . \
-  --kube-context docker-desktop \
-  --namespace ccf --create-namespace \
-  -f values/local.yaml \
-  -f values/plugins/github.yaml \
-  --set-string ccf-agent.config.plugins.github_repos.config.token="$GITHUB_TOKEN" \
-  --set-string ccf-agent.config.plugins.github_repos.config.organization=my-org
-```
-
-Or via Makefile:
+Secrets at install time via Makefile variables (never commit):
 
 ```bash
-make up PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
+make aks ADMIN_PASSWORD='...'
 ```
 
 ## Environment overlays
@@ -78,6 +105,11 @@ make up PLUGIN_VALUES="values/plugins/github.yaml" \
 
 | Setting | Purpose |
 |---------|---------|
+| API/UI **2 replicas** + PDB | Same HA baseline as production (survives pod restarts) |
+| Postgres persistence off | Faster reset on laptops |
+| `seedData.enabled: true` | Demo OSCAL so UI is not empty |
+| Inline admin password | Local-only login (`admin@ccf.local`) |
+| Metrics on | Works with `make obs` |
 | `postgres.persistence.enabled: false` | No PVC on laptop |
 | `api.environment: local` | Relaxed HTTPS behaviour |
 | `api.allowedOrigins` | CORS for `localhost:8000` / `:8080` |
@@ -85,29 +117,24 @@ make up PLUGIN_VALUES="values/plugins/github.yaml" \
 | `api.adminUser.enabled: true` | Default admin bootstrap |
 | `networkPolicy.enabled: false` | Simpler local networking |
 
-### `values/aks.yaml` (Azure Kubernetes Service)
+### `values/aks.yaml` (AKS smoke test)
 
 | Setting | Purpose |
 |---------|---------|
+| Single replica API/UI | Faster, cheaper validation |
 | `postgres.persistence.storageClass: managed-csi` | Azure Disk |
-| `postgres.podSecurityContext.fsGroup: 999` | Postgres volume permissions on Azure |
-| Resource requests/limits | Production-sized defaults |
-| Comments at bottom | LoadBalancer / ingress examples |
+| Same bootstrap as local | admin, seed, agent register, local-ssh plugin |
+| `adminUser.password: ""` | Inject via `make aks ADMIN_PASSWORD='...'` |
 
-### `values/postgres-ha.yaml` (reliability)
+### `values/production.yaml`
 
-Enables:
-
-- Bitnami PostgreSQL (`postgresql.enabled: true`) with replication architecture
-- Disables built-in `ccf-app.postgres`
-- Points API at `ccf-postgresql-primary`
-- API/UI: 2 replicas, PDBs, pod anti-affinity
-
-Requires password at install:
-
-```bash
-make up EXTRA_VALUES="values/postgres-ha.yaml" PG_PASSWORD='<strong-pw>'
-```
+| Setting | Purpose |
+|---------|---------|
+| HA API/UI + HPA + PDB | Production reliability |
+| Ingress + TLS + NetworkPolicy | External access hardening |
+| GitHub plugin in `ccf-agent.config.plugins` | Token/org via `GITHUB_TOKEN` / `GITHUB_ORG` |
+| `agentRegister` + auth Secret | Agent visible in Admin → Agents |
+| `seedData.enabled: false` | Import your own OSCAL |
 
 ## `ccf-app` — control plane
 
@@ -273,6 +300,7 @@ sequenceDiagram
 | Hook | Weight | Trigger | Purpose |
 |------|--------|---------|---------|
 | `ccf-api-admin-bootstrap` | 5 | post-install/upgrade | Create default admin user |
+| `ccf-api-agent-register` | 6 | post-install/upgrade | Register agent + auth Secret |
 | `ccf-api-seed` | 10 | post-install/upgrade | Import OSCAL demo data |
 | `ccf-test-connection` | test | `helm test` | Connectivity check |
 
@@ -284,45 +312,25 @@ Hooks delete successful Jobs (`hook-succeeded`) so they do not clutter the names
 |--------|-------------------|---------------------|
 | GitHub token | `GITHUB_TOKEN` | `ccf-agent.config.plugins.github_repos.config.token` |
 | GitHub org | `GITHUB_ORG` | `ccf-agent.config.plugins.github_repos.config.organization` |
-| HA Postgres password | `PG_PASSWORD` | `postgresql.auth.password` + `ccf-app.postgres.auth.password` |
 | Admin password | `ADMIN_PASSWORD` | `ccf-app.api.adminUser.password` |
 
 Add local secret-bearing files to `.gitignore` if you create custom value files.
 
-## Production install (subcharts)
-
-Use `values-production.yaml` per subchart — no plaintext passwords, HA, network policies, HPA:
+## Production install
 
 ```bash
-# Create Secrets first (see charts/ccf-app/values-production.yaml comments)
-
-helm upgrade --install ccf-app charts/ccf-app -n ccf --create-namespace \
-  -f charts/ccf-app/values-production.yaml
-
-helm upgrade --install ccf-agent charts/ccf-agent -n ccf \
-  -f charts/ccf-agent/values-production.yaml \
-  -f values/plugins/github.yaml \
-  --set-string config.plugins.github_repos.config.token="$GITHUB_TOKEN"
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
 ```
 
-Note: subchart install uses **top-level** keys (`config.plugins`, not `ccf-agent.config.plugins`).
-
-## GitOps (Argo CD)
-
-Manifests in [`argocd/`](../argocd/):
-
-```bash
-kubectl apply -n argocd -f argocd/root-application.yaml
-```
-
-Update `repoURL` and `targetRevision` to your fork. Prefer separate Applications for `ccf-app` and `ccf-agent` lifecycles.
+See [`production.md`](./production.md) for required Kubernetes Secrets.
 
 ## Validation before deploy
 
 ```bash
-make validate     # lint + render all env × plugin combinations
-helm template ccf . -f values/local.yaml -f values/plugins/github.yaml \
-  --set-string ccf-agent.config.plugins.github_repos.config.token=dummy \
+make validate     # lint + render local, aks, production
+make loadtest-smoke   # k6 API smoke (after make pf)
+helm template ccf . -f values/production.yaml \
+  --set-string ccf-app.api.adminUser.password=dummy \
   | less
 ```
 

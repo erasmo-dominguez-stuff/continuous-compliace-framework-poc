@@ -1,8 +1,18 @@
 # Prometheus values overlay for CCF observability.
-# Used by `make obs` together with the base prometheus-community chart flags.
+# Used by `make obs` — all flags here (do not add empty `server:` keys; they
+# null out chart defaults and break `--set server.*` merges).
 #
-# Ships PrometheusRule-style alerts as serverFiles (works without Alertmanager;
-# wire Alertmanager later for notifications).
+# Ships alert rules via serverFiles (Alertmanager disabled for local demos).
+
+alertmanager:
+  enabled: false
+
+prometheus-pushgateway:
+  enabled: false
+
+server:
+  extraFlags:
+    - web.enable-remote-write-receiver
 
 serverFiles:
   alerting_rules.yml:
@@ -85,6 +95,3 @@ serverFiles:
               severity: warning
             annotations:
               summary: Loki is not ready in observability namespace
-
-server:
-  # Retain default flags from Makefile obs-stack; this file layers alert rules only.

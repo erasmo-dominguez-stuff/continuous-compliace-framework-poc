@@ -1,74 +1,48 @@
-# AKS (Azure Kubernetes Service) test environment overlay.
-#
-# Environment config only; plugins live in values/plugins/ and are layered on
-# top (reusable across environments):
-#
-#   az aks get-credentials --resource-group <rg> --name <aks-name>
-#   helm dependency build .
-#   helm upgrade --install ccf . -n ccf --create-namespace \
-#     -f values/aks.yaml -f values/plugins/local-ssh.yaml --wait --timeout 8m
-#   # or: make install-aks
-#
-# Access (no public networking required):
-#   kubectl -n ccf port-forward svc/ccf-ui 8000:80
-#   kubectl -n ccf port-forward svc/ccf-api 8080:8080
-#   open http://localhost:8000
-#
-# For PUBLIC access, see the LoadBalancer / ingress notes at the bottom.
+# AKS smoke-test overlay — minimal config to validate the stack on Azure.
+# Usage:
+#   az aks get-credentials --resource-group <rg> --name <aks>
+#   make aks ADMIN_PASSWORD='<strong-pw>'
+#   make pf-aks
 
 ccf-app:
   enabled: true
   fullnameOverride: ccf
-
   postgres:
-    enabled: true
     persistence:
       enabled: true
-      # AKS ships these CSI StorageClasses out of the box:
-      #   managed-csi          (Standard SSD, Azure Disk)  <- used here
-      #   managed-csi-premium  (Premium SSD)
-      # Leave empty ("") to use the cluster's default StorageClass instead.
       storageClass: managed-csi
       size: 8Gi
-    # Azure Disk mounts are root-owned; fsGroup lets the postgres user (gid 999)
-    # write to the volume. Without this, postgres can CrashLoop on AKS.
     podSecurityContext:
       fsGroup: 999
     resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "1"
-        memory: 1Gi
-
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: "1", memory: 1Gi }
   api:
-    # 'local' keeps non-HTTPS auth behaviour so login works over the
-    # http://localhost port-forward. Switch to 'production' only behind TLS.
     environment: local
     allowedOrigins: "http://localhost:8000,http://localhost:3000"
+    replicaCount: 1
     metrics:
       enabled: true
+    adminUser:
+      enabled: true
+      email: admin@ccf.local
+      firstName: Admin
+      lastName: User
+      password: ""              # inject: make aks ADMIN_PASSWORD='...'
+    seedData:
+      enabled: true
+    agentRegister:
+      enabled: true
+      name: ccf-kubernetes-agent
     resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: "1"
-        memory: 512Mi
-
+      requests: { cpu: 100m, memory: 256Mi }
+      limits: { cpu: "1", memory: 512Mi }
   ui:
-    # Matches the port-forward below. For LoadBalancer/ingress, set this to the
-    # API's external URL (see notes at the bottom).
     apiUrl: "http://localhost:8080"
+    replicaCount: 1
     resources:
-      requests:
-        cpu: 25m
-        memory: 64Mi
-      limits:
-        cpu: 250m
-        memory: 128Mi
-
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { cpu: 250m, memory: 128Mi }
   ingress:
     enabled: false
   networkPolicy:
@@ -78,36 +52,19 @@ ccf-agent:
   enabled: true
   fullnameOverride: ccf-agent
   apiUrl: "http://ccf-api:8080"
+  extraEnv:
+    - name: CCF_API_AUTH_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_id
+    - name: CCF_API_AUTH_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: ccf-agent-auth
+          key: client_secret
+  auth:
+    waitForRegistration: true
   resources:
-    requests:
-      cpu: 25m
-      memory: 64Mi
-    limits:
-      cpu: 250m
-      memory: 256Mi
-
-# ---------------------------------------------------------------------------
-# Public access on AKS (optional, instead of port-forward)
-# ---------------------------------------------------------------------------
-# Option A - LoadBalancer (gets a public IP per service; two-step because the
-# UI must know the API's public URL):
-#   1. Set under ccf-app.api / ccf-app.ui:
-#        service:
-#          type: LoadBalancer
-#   2. Deploy, then read the external IPs:
-#        kubectl -n ccf get svc ccf-ui ccf-api
-#   3. Set ccf-app.ui.apiUrl to "http://<API_EXTERNAL_IP>:8080" and
-#      ccf-app.api.allowedOrigins to "http://<UI_EXTERNAL_IP>", then
-#      `helm upgrade` again.
-#
-# Option B - Ingress (recommended for a real URL + TLS): install an ingress
-# controller (e.g. ingress-nginx or the AKS Application Routing add-on), point
-# DNS at its public IP, then enable:
-#   ccf-app:
-#     ingress:
-#       enabled: true
-#       className: nginx
-#       uiHost: ccf.<your-domain>
-#       apiHost: api.ccf.<your-domain>
-#   When uiHost/apiHost are set, ui.apiUrl and api.allowedOrigins are derived
-#   automatically (no need to set them manually above).
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { cpu: 250m, memory: 256Mi }

@@ -16,17 +16,17 @@ spec:
       labels:
         {{- include "ccf.componentLabels" (dict "ctx" . "component" "postgres") | nindent 8 }}
     spec:
-      {{- with .Values.imagePullSecrets }}
+      {{- with include "ccf.imagePullSecrets" . }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "ccf.serviceAccountName" . }}
       securityContext:
         {{- toYaml (default .Values.podSecurityContext .Values.postgres.podSecurityContext) | nindent 8 }}
       containers:
         - name: postgres
-          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
-          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          image: {{ include "ccf.image.ref" (dict "root" . "component" "postgres" "image" .Values.postgres.image "defaultTag" (.Values.images.postgres.tag | default "0.0.5")) | quote }}
+          imagePullPolicy: {{ include "ccf.image.pullPolicy" (dict "root" . "image" .Values.postgres.image) }}
           securityContext:
             {{- toYaml (default .Values.securityContext .Values.postgres.securityContext) | nindent 12 }}
           envFrom:

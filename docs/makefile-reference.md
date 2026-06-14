@@ -1,6 +1,6 @@
 # Makefile reference
 
-The `Makefile` automates local (Docker Desktop) and AKS deployments. Run `make help` for the public target list.
+The `Makefile` automates local (Docker Desktop), AKS smoke test, and production deployments. Run `make help` for the public target list.
 
 ## Variables
 
@@ -10,162 +10,79 @@ The `Makefile` automates local (Docker Desktop) and AKS deployments. Run `make h
 | `NAMESPACE` | `ccf` | CCF release namespace |
 | `OBS_NAMESPACE` | `observability` | Observability stack namespace |
 | `RELEASE` | `ccf` | Helm release name |
-| `CHART_DIR` | `.` | Umbrella chart path |
 | `ENV_LOCAL` | `values/local.yaml` | Local environment overlay |
-| `ENV_AKS` | `values/aks.yaml` | AKS environment overlay |
-| `ENV_PROD` | `values/production.yaml` | Production profile overlay |
-| `PLUGIN_VALUES` | `values/plugins/local-ssh.yaml` | Space-separated plugin overlays |
-| `EXTRA_VALUES` | (empty) | Extra overlays, e.g. `values/postgres-ha.yaml` |
-| `GITHUB_TOKEN` | (empty) | Injected to GitHub plugin config (not stored in git) |
-| `GITHUB_ORG` | (empty) | GitHub organisation for plugin |
-| `PG_PASSWORD` | (empty) | Bitnami + API DB password (HA overlay) |
-| `ADMIN_PASSWORD` | (empty) | Enables admin bootstrap + sets password |
-| `SEED` | (empty) | Set to `1` to enable OSCAL demo seed |
-| `POLICY_DIR` | `policies` | Rego source directory |
-| `POLICY_BUNDLE` | `dist/policies-bundle.tar.gz` | Built bundle output |
-| `POLICY_IMAGE` | `ghcr.io/your-org/ccf-custom-policies:v0.1.0` | OCI push destination |
-| `GHCR_USER` / `GHCR_TOKEN` | (empty) | Registry credentials for `policy-push` |
+| `ENV_AKS` | `values/aks.yaml` | AKS smoke-test overlay |
+| `ENV_PROD` | `values/production.yaml` | Production overlay |
+| `REGISTRY_PREFIX` | (empty) | Mirror all CCF images |
+| `GITHUB_TOKEN` | (empty) | GitHub plugin token (prod / custom) |
+| `GITHUB_ORG` | (empty) | GitHub organisation |
+| `ADMIN_PASSWORD` | (empty) | Admin bootstrap password |
+| `PLUGIN_VALUES` | (auto) | Space-separated plugin overlays; overrides defaults for any target |
+| `PROD_PLUGIN_VALUES` | `values/plugins/github.yaml` | Default plugins for `make prod` when `PLUGIN_VALUES` is empty |
+| `SEED` | (empty) | Set to `1` to force OSCAL seed (on by default in local/aks) |
+| `LOADTEST_BASE_URL` | `http://localhost:8080` | k6 target API URL |
+| `LOADTEST_ADMIN_EMAIL` | `admin@ccf.local` | k6 login email |
+| `LOADTEST_ADMIN_PASSWORD` | `Admin12345!` | k6 login password |
+| `K6_VUS` / `K6_DURATION` | `10` / `2m` | Load test intensity (see loadtest/README.md) |
 
-### How overlays combine
-
-`make up` runs:
-
-```text
-helm upgrade --install ccf . \
-  -f values/local.yaml \
-  $(PLUGIN_ARGS) $(EXTRA_ARGS) $(SECRET_ARGS) $(SEED_ARGS)
-```
-
-`make aks` uses `values/aks.yaml` instead and the **current** kube-context (no `KUBE_CONTEXT` pin).
-
----
-
-## Public targets
-
-### CCF stack
+## Headline targets
 
 | Target | Description |
 |--------|-------------|
-| `make up` | Install/upgrade full CCF on Docker Desktop |
-| `make down` | Uninstall CCF release (cluster stays) |
-| `make status` | `kubectl get pods,svc -n ccf` |
-| `make pf` | Port-forward UI (:8000) + API (:8080) |
+| `make up` | Deploy CCF locally (`values/local.yaml`) |
+| `make aks` | Deploy on current context (`values/aks.yaml`) |
+| `make prod` | Production profile (`values/production.yaml`) |
+| `make obs` | Loki + Prometheus + Grafana + Alloy |
+| `make pf` | Port-forward UI :8000, API :8080 |
 | `make pf-all` | Port-forward UI, API, Grafana, Prometheus, Loki |
-
-### Observability
-
-| Target | Description |
-|--------|-------------|
-| `make obs` | Install Loki + Prometheus + Grafana + Alloy |
-| `make obs-grafana` | Port-forward Grafana only (:3000) |
-| `make obs-loki` | Port-forward Loki only (:3100) |
-
-### AKS / production
-
-| Target | Description |
-|--------|-------------|
-| `make aks` | Install CCF on current kube-context |
-| `make prod` | Production profile (`values/production.yaml`) on current context — requires `ADMIN_PASSWORD` and plugin overlay |
-| `make pf-aks` | Port-forward UI/API on current context |
-| `make install-aks` | Alias for `make aks` |
-
-Production example:
-
-```bash
-# Create Secrets first (see docs/production.md)
-make prod ADMIN_PASSWORD='...' \
-  PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=... GITHUB_ORG=... \
-  EXTRA_VALUES="values/production-ha.yaml" PG_PASSWORD='...'
-make obs
-```
-
-### Policies
-
-| Target | Description |
-|--------|-------------|
-| `make policy` | `opa check` + `opa test` on `policies/` |
-| `make policy-push` | Build bundle + push to `POLICY_IMAGE` |
-
-### Validation
-
-| Target | Description |
-|--------|-------------|
-| `make validate` | Offline: lint + render all env/plugin combos |
-| `make smoke` | Live: wait for rollouts + `helm test` |
-| `make test` | Run helm test hooks only |
-
----
-
-## Internal targets (not in `make help`)
-
-| Target | Purpose |
-|--------|---------|
-| `deps` | `helm dependency build` |
-| `lint` | `helm lint` umbrella + subcharts |
-| `template-all` | Render every overlay combination |
-| `docker-ensure` | Verify Docker Desktop K8s reachable |
-| `obs-repos` | Add Grafana/Prometheus helm repos |
-| `obs-stack` | Loki + Prometheus + Grafana only |
-| `obs-alloy` | Alloy collector only |
-| `policy-validate` | `opa check` |
-| `policy-test` | `opa test -v` |
-| `policy-build` | `opa build` → `dist/` |
-| `install-app` / `install-agent` | Standalone subchart install |
-| `_pf` | Internal port-forward helper |
-
----
+| `make smoke` | Rollout wait + `helm test` |
+| `make loadtest-smoke` | k6 single-iteration API smoke test |
+| `make loadtest` | k6 sustained load test |
+| `make validate` | Offline lint + render all three overlays |
+| `make screenshots` | Re-capture `docs/images/*.png` (needs port-forwards) |
+| `make down` | Uninstall CCF release |
 
 ## Examples
 
-### Local with everything
+### Local full stack
 
 ```bash
-make up SEED=1 \
-  PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=my-org
-
-make obs
-make pf-all
+make up && make obs && make pf-all
+# UI http://localhost:8000  Grafana http://localhost:3000
 ```
 
-### AKS with HA database
+### AKS smoke test
 
 ```bash
-az aks get-credentials -g myrg -n myaks
-
-make aks \
-  EXTRA_VALUES="values/postgres-ha.yaml" \
-  PG_PASSWORD='...' \
-  ADMIN_PASSWORD='...' \
-  SEED=1
+az aks get-credentials --resource-group <rg> --name <aks>
+make aks ADMIN_PASSWORD='<strong-pw>'
+make pf-aks
 ```
 
-### Policy development loop
+### Production
 
 ```bash
-# edit policies/*.rego
-make policy
-make policy-push POLICY_IMAGE=ghcr.io/me/policies:v0.2.0 GHCR_USER=me GHCR_TOKEN=$TOKEN
-make up PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" ...
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
+make obs && make pf-aks
 ```
 
-### Offline CI check
+### Production with custom policies
 
 ```bash
-make validate && make policy
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org' \
+  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml"
 ```
 
----
+### Load test
 
-## Port-forward map (`make pf-all`)
+```bash
+make pf              # terminal 1
+make loadtest-smoke  # terminal 2
+make loadtest K6_VUS=20 K6_DURATION=5m
+```
 
-| Local port | Service | Namespace |
-|------------|---------|-----------|
-| 8000 | `ccf-ui` | `ccf` |
-| 8080 | `ccf-api` | `ccf` |
-| 3000 | `ccf-grafana` | `observability` |
-| 9091 | `prometheus-server` | `observability` |
-| 3100 | `loki` | `observability` |
+### Mirror private registry
 
-Observability forwards are skipped silently if those releases are not installed.
+```bash
+make up REGISTRY_PREFIX=artifactory.example.com/docker-remote/compliance-framework
+```

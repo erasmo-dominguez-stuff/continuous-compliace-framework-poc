@@ -169,3 +169,58 @@ admin/seed Jobs. Render with `{{- include "ccf.api.envFrom" . | nindent N }}`.
     name: {{ .Values.api.database.existingSecret }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolved container registry (private mirror). Override images.registry in this chart
+or ccf-app.images.registry / ccf-agent.images.registry from the umbrella chart.
+*/}}
+{{- define "ccf.images.registry" -}}
+{{- if and .Values.global .Values.global.images -}}
+{{- coalesce .Values.global.images.registry .Values.global.images.registryPrefix .Values.images.registry .Values.images.registryPrefix "ghcr.io/compliance-framework" -}}
+{{- else -}}
+{{- coalesce .Values.images.registry .Values.images.registryPrefix "ghcr.io/compliance-framework" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Legacy alias used by the agent chart for plugin OCI rewrite source prefix.
+*/}}
+{{- define "ccf.images.registryPrefix" -}}
+{{- include "ccf.images.registry" . -}}
+{{- end }}
+
+{{- define "ccf.images.defaultPrefix" -}}
+{{- coalesce .Values.images.pluginRegistry "ghcr.io/compliance-framework" -}}
+{{- end }}
+
+{{- define "ccf.image.pullPolicy" -}}
+{{- coalesce .image.pullPolicy .root.Values.images.pullPolicy "IfNotPresent" -}}
+{{- end }}
+
+{{- define "ccf.image.ref" -}}
+{{- $root := .root -}}
+{{- $component := .component -}}
+{{- $image := .image -}}
+{{- $defaultTag := .defaultTag | default $root.Chart.AppVersion -}}
+{{- $cfg := index $root.Values.images $component | default dict -}}
+{{- $registry := include "ccf.images.registry" $root -}}
+{{- $repoPart := coalesce $image.repository $cfg.repository $component -}}
+{{- $repo := ternary $repoPart (printf "%s/%s" $registry $repoPart) (contains "/" $repoPart) -}}
+{{- $tag := coalesce $image.tag $cfg.tag $defaultTag -}}
+{{- printf "%s:%s" $repo $tag -}}
+{{- end }}
+
+{{- define "ccf.imagePullSecrets" -}}
+{{- if .Values.images.pullSecrets -}}
+{{- toYaml .Values.images.pullSecrets -}}
+{{- else -}}
+{{- toYaml (.Values.imagePullSecrets | default list) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Default Secret name for agent service-account credentials.
+*/}}
+{{- define "ccf.agentAuth.secretName" -}}
+{{- .Values.api.agentRegister.secretName | default (printf "%s-agent-auth" (include "ccf.fullname" .)) -}}
+{{- end }}

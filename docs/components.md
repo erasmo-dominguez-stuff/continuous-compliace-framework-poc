@@ -46,10 +46,10 @@ flowchart TB
 | | |
 |---|---|
 | **What it is in CCF** | The **source of truth** for all compliance data: users, OSCAL documents, evidence, agent heartbeats, workflows, filters. |
-| **Helm chart** | `ccf-app` → StatefulSet `ccf-postgres` (default) or external DB / Bitnami HA overlay |
+| **Helm chart** | `ccf-app` → StatefulSet `ccf-postgres` (default) or external DB |
 | **Image** | `ghcr.io/compliance-framework/pg-ccf` |
 | **When to use bundled** | Dev/demo/small installs |
-| **Production** | Enable persistence + backups; prefer `values/production-ha.yaml` (Bitnami replication) or a managed PostgreSQL service |
+| **Production** | Enable persistence + backups; use managed PostgreSQL or bundled StatefulSet with PVC |
 
 The API runs **database migrations** automatically (`api.migrations.enabled`) so schema tables exist before login works.
 
@@ -147,12 +147,13 @@ Run **one agent Deployment per estate** (cluster/org). Scale horizontally by dep
 | **Configured in** | `ccf-agent.config.plugins.<name>.source` |
 | **Not a K8s workload** | Downloaded and executed by the agent on schedule |
 
-Example plugins in this repo’s overlays:
+Plugins are configured under `ccf-agent.config.plugins` in each environment overlay:
 
 | Overlay | Plugin | Good for |
-|---------|--------|----------|
-| `values/plugins/github.yaml` | `plugin-github-repositories` | Org/repo compliance demos |
-| `values/plugins/local-ssh.yaml` | `plugin-local-ssh` | SSH hardening on **hosts with sshd** (not inside containers) |
+|-------------|--------|----------|
+| `values/plugins/local-ssh.yaml` | `plugin-local-ssh` | Local demo |
+| `values/plugins/github.yaml` | `plugin-github-repositories` | Org/repo compliance |
+| `values/plugins/custom-policies.yaml` | Custom Rego OCI bundle | Layer after `github.yaml` |
 
 Browse all: https://github.com/orgs/compliance-framework/repositories?q=plugin-
 
@@ -193,7 +194,7 @@ Production: import your real catalogs/SSPs via `/api oscal import` or your GRC t
 |-------------|---------------------|-------|
 | Control plane | Postgres + API + UI pods | `ccf-app` |
 | Agent scheduler | Agent Deployment + Secret | `ccf-agent` |
-| Plugin/policy config | Keys in agent Secret | `values/plugins/*.yaml` |
+| Plugin/policy config | Keys in agent Secret | `values/plugins/*.yaml` layered on env overlay |
 | Demo OSCAL | ConfigMap + hook Job | `seed/oscal/` + `api.seedData` |
 | Admin user | Secret + hook Job | `api.adminUser` |
 | Full stack | Single Helm release | Umbrella `ccf/` |

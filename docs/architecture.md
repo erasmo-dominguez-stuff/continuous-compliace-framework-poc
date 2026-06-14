@@ -11,7 +11,7 @@ This Helm repo deploys two lifecycles:
 | **`ccf-app`** | Control plane: PostgreSQL + API + UI | Once per organisation / cluster |
 | **`ccf-agent`** | Plugin scheduler: pulls plugins, runs checks, reports to API | One or many (per cluster, namespace, edge) |
 
-The **umbrella chart** (`ccf/`) composes both for a single-command install (dev/demo). Production GitOps typically installs subcharts as separate Argo CD Applications.
+The **umbrella chart** (`ccf/`) composes both for a single-command install via `make up`, `make aks`, or `make prod`.
 
 ### Kubernetes deployment (this repo)
 

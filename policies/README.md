@@ -79,7 +79,7 @@ input.settings.archived        # true | false
 Static config from Helm `policy_data`:
 
 ```yaml
-# in values/plugins/custom-policies.yaml
+# in values/production.yaml under ccf-agent.config.plugins.<name>
 policy_data:
   allow_public_repositories: false
 ```
@@ -110,13 +110,12 @@ Requires:
 ## Deploy with Helm
 
 1. Push your bundle (above)
-2. Edit [`values/plugins/custom-policies.yaml`](../values/plugins/custom-policies.yaml) with your `POLICY_IMAGE`
-3. Layer on a plugin overlay:
+2. Set your OCI image in [`values/plugins/custom-policies.yaml`](../values/plugins/custom-policies.yaml)
+3. Deploy:
 
 ```bash
-make up \
-  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org>
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=<your-org> \
+  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml"
 ```
 
 Both upstream and custom bundles are listed under `policies[]` — the agent pulls all of them.

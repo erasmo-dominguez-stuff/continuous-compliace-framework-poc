@@ -1,0 +1,27 @@
+# Umbrella chart packaging — keep the release Secret under the 1 MiB K8s limit.
+# Without this, `helm install` bundles .git/ into the release Secret and exceeds the limit.
+
+.git/
+.gitignore
+.github/
+.DS_Store
+*.swp
+*.bak
+
+# Repo docs, tests, and tooling (not part of the chart)
+docs/
+loadtest/
+policies/
+observability/
+Makefile
+README.md
+
+# Environment overlays are passed with -f at install time, not embedded in the chart
+values/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Do NOT add `*.tgz` here — negation (!charts/*.tgz) breaks Helm 3.18 lint/install.
+# Dependency archives under charts/*.tgz must stay in the package.

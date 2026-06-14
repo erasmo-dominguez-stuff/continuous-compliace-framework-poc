@@ -1,218 +1,119 @@
 # Quick start workflows
 
-Step-by-step recipes for common CCF deployments using this repo.
+Three values files, three commands. See [Setup evidence](./setup-evidence.md) for screenshots.
 
-## Demo flows at a glance
+## Values files
 
-```mermaid
-flowchart TB
-    START(["Start"])
-
-    START --> LOCAL["make up<br/>local CCF"]
-    START --> SEED["make up SEED=1<br/>+ populated UI"]
-    START --> GH["make up + github plugin<br/>GITHUB_TOKEN · GITHUB_ORG"]
-    START --> OBS["make obs + pf-all<br/>logs & metrics"]
-    START --> AKS["make aks<br/>Azure AKS"]
-
-    LOCAL --> PF["make pf → :8000"]
-    SEED --> PF
-    GH --> PF
-    AKS --> PFAKS["make pf-aks"]
-
-    OBS --> PFALL["make pf-all → Grafana :3000"]
-```
+| File | Command | Use case |
+|------|---------|----------|
+| `values/local.yaml` | `make up` | Docker Desktop demo |
+| `values/aks.yaml` | `make aks` | AKS smoke test |
+| `values/production.yaml` | `make prod` | Production (ingress, HA, GitHub plugin) |
 
 ## Prerequisites
 
-- **Local:** Docker Desktop with Kubernetes enabled, `kubectl`, `helm`
-- **AKS:** Azure CLI, `kubectl`, `helm`, an AKS cluster
+- **Local:** Docker Desktop Kubernetes, `kubectl`, `helm`
+- **AKS:** Azure CLI + cluster credentials
+- **Load tests:** [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) (`brew install k6`)
 - **Policies:** [OPA CLI](https://www.openpolicyagent.org/) for `make policy`
-
-Run `make help` anytime for the command list.
 
 ---
 
-## 1. Local CCF demo (minimum)
+## 1. Local demo
 
 ```bash
-make up          # CCF on docker-desktop (admin + local-ssh plugin)
+make up          # CCF + seed OSCAL + agent register + local-ssh plugin
 make pf          # UI :8000, API :8080
 ```
 
-Open http://localhost:8000 — login:
+Open http://localhost:8000 — `admin@ccf.local` / `Admin12345!`
 
-- Email: `admin@ccf.local`
-- Password: `Admin12345!`
+Validate:
 
-Tear down: `make down`
+```bash
+make smoke           # rollouts + helm test
+make loadtest-smoke  # k6 (with make pf running)
+```
+
+Screenshots: [setup-evidence.md](./setup-evidence.md)
 
 ---
 
-## 2. Local demo with populated UI (OSCAL seed)
-
-Local installs import demo OSCAL automatically (`api.seedData.enabled: true` in
-`values/local.yaml`). After `make up`, hard-refresh the browser.
+## 2. Observability
 
 ```bash
 make up
-make pf
-```
-
-Files imported: `charts/ccf-app/seed/oscal/` (catalog → SSP → plan → results → POA&M).
-
----
-
-## 3. GitHub organisation demo
-
-Scan your GitHub org repos for compliance findings.
-
-```bash
-export GITHUB_TOKEN=ghp_xxx    # read-only PAT
-export GITHUB_ORG=my-org
-
-make up SEED=1 \
-  PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=$GITHUB_ORG
-
-make pf
-```
-
-Watch the agent:
-
-```bash
-kubectl --context docker-desktop -n ccf logs deploy/ccf-agent -f
-```
-
-Verify evidence in the API (after port-forward on 8080):
-
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" \
-  -X POST http://localhost:8080/api/evidence/search -d '{}' | jq '.data | length'
-```
-
----
-
-## 4. Custom policies on GitHub plugin
-
-```bash
-# 1. Author & test
-make policy
-
-# 2. Push bundle (update image to your registry)
-make policy-push \
-  POLICY_IMAGE=ghcr.io/my-org/ccf-custom-policies:v0.1.0 \
-  GHCR_USER=$GHCR_USER GHCR_TOKEN=$GHCR_TOKEN
-
-# 3. Edit values/plugins/custom-policies.yaml with your POLICY_IMAGE
-
-# 4. Deploy
-make up SEED=1 \
-  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=$GITHUB_ORG
-```
-
-See [Plugins & policies](./policies-and-plugins.md) for the full guide.
-
----
-
-## 5. Observability (logs + metrics)
-
-Requires CCF already running (`make up`).
-
-```bash
 make obs       # Loki + Prometheus + Grafana + Alloy
-make pf-all    # forward UI, API, Grafana, Prometheus, Loki
+make pf-all    # UI, API, Grafana :3000, Prometheus :9091, Loki :3100
 ```
 
-| URL | Credentials |
-|-----|-------------|
-| http://localhost:8000 | CCF UI — `admin@ccf.local` / `Admin12345!` |
-| http://localhost:3000 | Grafana — `admin` / `admin` |
-
-Open Grafana → dashboard **"CCF - Logs & Metrics"**.
+Grafana: http://localhost:3000 (`admin` / `admin`) → **CCF - Logs & Metrics**
 
 ---
 
-## 6. AKS deployment
+## 3. AKS smoke test
+
+Minimal validation that the stack works on Azure:
 
 ```bash
 az aks get-credentials --resource-group <rg> --name <aks>
-
-make aks SEED=1 ADMIN_PASSWORD='<strong-password>' \
-  PLUGIN_VALUES="values/plugins/github.yaml" \
-  GITHUB_TOKEN=$GITHUB_TOKEN GITHUB_ORG=$GITHUB_ORG
-
-make pf-aks    # UI/API on localhost
+make aks ADMIN_PASSWORD='<strong-password>'
+make pf-aks
 ```
 
-Optional HA Postgres:
-
-```bash
-make aks EXTRA_VALUES="values/postgres-ha.yaml" \
-  PG_PASSWORD='<strong-pw>' ADMIN_PASSWORD='<strong-pw>'
-```
+Same login as local (`admin@ccf.local` + your password). Single replica, `managed-csi` persistence.
 
 ---
 
-## 7. Validate without a cluster
+## 4. Production
 
 ```bash
-make validate    # helm lint + render all overlays
+# Create Secrets first — see docs/production.md
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org'
+make obs && make pf-aks
+```
+
+GitHub plugin config is built into `values/production.yaml`; token/org injected via Makefile.
+
+---
+
+## 5. Custom policies + GitHub
+
+```bash
+make policy
+make policy-push POLICY_IMAGE=ghcr.io/my-org/ccf-custom-policies:v0.1.0 \
+  GHCR_USER=$GHCR_USER GHCR_TOKEN=$GHCR_TOKEN
+```
+
+Edit `values/plugins/custom-policies.yaml` with your `POLICY_IMAGE`, then:
+
+```bash
+make prod ADMIN_PASSWORD='...' GITHUB_TOKEN='...' GITHUB_ORG='your-org' \
+  PLUGIN_VALUES="values/plugins/github.yaml values/plugins/custom-policies.yaml"
+```
+
+See [values/plugins/README.md](../values/plugins/README.md) and [Plugins & policies](./policies-and-plugins.md).
+
+---
+
+## 6. Offline validation
+
+```bash
+make validate    # lint + render local, aks, production
 make policy      # opa check + test
 ```
 
 ---
 
-## 8. Smoke test on live cluster
-
-After `make up`:
-
-```bash
-make smoke       # wait for rollouts + helm test (API OK / UI OK)
-```
-
----
-
-## 9. Production (split lifecycles)
-
-```bash
-# Create DB + JWT secrets first (see charts/ccf-app/values-production.yaml)
-
-helm upgrade --install ccf-app charts/ccf-app -n ccf --create-namespace \
-  -f charts/ccf-app/values-production.yaml
-
-helm upgrade --install ccf-agent charts/ccf-agent -n ccf \
-  -f charts/ccf-agent/values-production.yaml \
-  -f values/plugins/github.yaml \
-  --set-string config.plugins.github_repos.config.token="$GITHUB_TOKEN" \
-  --set-string config.plugins.github_repos.config.organization="$GITHUB_ORG"
-```
-
-GitOps: `kubectl apply -n argocd -f argocd/root-application.yaml`
-
----
-
-## 10. Manual OSCAL import
-
-Add your own compliance documents:
-
-```bash
-kubectl -n ccf cp my-catalog.json deploy/ccf-api:/tmp/catalog.json
-kubectl -n ccf exec deploy/ccf-api -- /api oscal import -f /tmp/catalog.json
-```
-
-Or extend `charts/ccf-app/seed/oscal/` and enable `api.seedData.enabled`.
-
----
-
-## Troubleshooting quick reference
+## Troubleshooting
 
 | Problem | Action |
 |---------|--------|
-| `docker-desktop` not reachable | Start Docker Desktop → Enable Kubernetes |
-| Can't login | Check migrations: `kubectl logs deploy/ccf-api -c migrate` |
-| No agents in UI | Check agent logs + API version ≥ 0.13 |
-| Empty UI sections | Run with `SEED=1` or import OSCAL |
-| Plugin errors | `kubectl logs deploy/ccf-agent` — often missing token or wrong plugin for environment |
+| `docker-desktop` not reachable | Docker Desktop → Enable Kubernetes |
+| Can't login | `kubectl logs deploy/ccf-api -c migrate` |
+| No agents in UI | Wait for `ccf-api-agent-register` hook; check `kubectl get secret ccf-agent-auth` |
+| Empty UI | Seed enabled in local/aks; hard-refresh browser |
+| `make up` timeout | Hooks need ~6 min first install; timeout is 8m |
+| k6 fails | Run `make pf` first; check `LOADTEST_*` vars |
 
 Full details: [Helm configuration — Troubleshooting](./helm-configuration.md#troubleshooting)

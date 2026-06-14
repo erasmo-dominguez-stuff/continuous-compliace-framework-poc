@@ -1,0 +1,139 @@
+{{- if and .Values.api.enabled .Values.api.adminUser.enabled .Values.api.agentRegister.enabled -}}
+{{- $adminSecret := .Values.api.adminUser.existingSecret | default (printf "%s-admin" (include "ccf.api.fullname" .)) -}}
+{{- $agentAuthSecret := include "ccf.agentAuth.secretName" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-agent-register
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-agent-register") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-agent-register
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-agent-register") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-agent-register
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-agent-register") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "ccf.api.fullname" . }}-agent-register
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ccf.api.fullname" . }}-agent-register
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ccf.api.fullname" . }}-agent-register
+  labels:
+    {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-agent-register") | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "6"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "ccf.componentLabels" (dict "ctx" . "component" "api-agent-register") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "ccf.api.fullname" . }}-agent-register
+      {{- with include "ccf.imagePullSecrets" . }}
+      imagePullSecrets:
+        {{- . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: register-agent
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: API_URL
+              value: {{ include "ccf.api.serviceUrl" . | quote }}
+            - name: ADMIN_EMAIL
+              value: {{ .Values.api.adminUser.email | quote }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: password
+            - name: AGENT_NAME
+              value: {{ .Values.api.agentRegister.name | quote }}
+            - name: KEY_NAME
+              value: {{ .Values.api.agentRegister.keyName | quote }}
+            - name: AUTH_SECRET
+              value: {{ $agentAuthSecret | quote }}
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              apk add --no-cache curl jq kubectl >/dev/null
+              API="${API_URL%/}/api"
+              echo "waiting for API..."
+              until curl -sf "${API}/auth/publickey" >/dev/null; do sleep 2; done
+              if kubectl -n "${NAMESPACE}" get secret "${AUTH_SECRET}" >/dev/null 2>&1; then
+                echo "agent auth secret already exists; skipping registration"
+                exit 0
+              fi
+              TOKEN=$(curl -sf -X POST "${API}/auth/login" \
+                -H 'Content-Type: application/json' \
+                -d "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" | jq -r '.data.auth_token // empty')
+              if [ -z "${TOKEN}" ] || [ "${TOKEN}" = "null" ]; then
+                echo "admin login failed (check api.adminUser credentials)" >&2
+                exit 1
+              fi
+              AGENT_ID=$(curl -sf -H "Authorization: Bearer ${TOKEN}" "${API}/admin/agents" \
+                | jq -r --arg n "${AGENT_NAME}" '.data[] | select(.name==$n) | .id' | head -n1)
+              if [ -z "${AGENT_ID}" ] || [ "${AGENT_ID}" = "null" ]; then
+                AGENT_ID=$(curl -sf -X POST "${API}/admin/agents" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"${AGENT_NAME}\"}" | jq -r .data.id)
+              fi
+              test -n "${AGENT_ID}" && test "${AGENT_ID}" != "null"
+              RESP=$(curl -sf -X POST "${API}/admin/agents/${AGENT_ID}/keys" \
+                -H "Authorization: Bearer ${TOKEN}" \
+                -H 'Content-Type: application/json' \
+                -d "{\"name\":\"${KEY_NAME}\",\"never-expires\":true}")
+              CLIENT_ID=$(echo "${RESP}" | jq -r '.data["client-id"] // .data.client_id // empty')
+              CLIENT_SECRET=$(echo "${RESP}" | jq -r '.data["client-secret"] // .data.client_secret // empty')
+              if [ -z "${CLIENT_ID}" ] || [ -z "${CLIENT_SECRET}" ]; then
+                echo "agent key creation failed (unexpected API response)" >&2
+                exit 1
+              fi
+              kubectl -n "${NAMESPACE}" create secret generic "${AUTH_SECRET}" \
+                --from-literal=client_id="${CLIENT_ID}" \
+                --from-literal=client_secret="${CLIENT_SECRET}" \
+                --dry-run=client -o yaml | kubectl apply -f -
+              echo "registered agent ${AGENT_NAME} (${AGENT_ID})"
+{{- end }}

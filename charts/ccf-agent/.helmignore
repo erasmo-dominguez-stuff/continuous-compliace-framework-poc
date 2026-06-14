@@ -7,4 +7,3 @@
 *.bak
 *.tgz
 ci/
-values-production.yaml

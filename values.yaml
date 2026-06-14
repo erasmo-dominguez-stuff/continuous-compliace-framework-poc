@@ -1,29 +1,14 @@
 # Umbrella values for the CCF stack.
 # Keys are namespaced by subchart. See charts/ccf-app/values.yaml and
 # charts/ccf-agent/values.yaml for the full set of options.
+#
+# Environment overlays: values/local.yaml, values/aks.yaml, values/production.yaml
 
-# ccf-app: PostgreSQL + API + UI (control plane)
 ccf-app:
   enabled: true
-  # Deterministic resource names so the agent can target the API reliably.
   fullnameOverride: ccf
-  # postgres: {}
-  # api: {}
-  # ui: {}
-  # ingress: {}
 
-# ccf-agent: compliance plugin scheduler
 ccf-agent:
   enabled: true
   fullnameOverride: ccf-agent
-  # With ccf-app.fullnameOverride=ccf, the API service is "ccf-api".
   apiUrl: "http://ccf-api:8080"
-  # config:
-  #   plugins: {}
-
-# Optional official Bitnami PostgreSQL dependency. MUST default to false here:
-# Helm only honours the `postgresql.enabled` dependency condition if the path
-# exists, otherwise the subchart is enabled by default. The built-in
-# ccf-app.postgres is used unless you opt into HA via values/postgres-ha.yaml.
-postgresql:
-  enabled: false
