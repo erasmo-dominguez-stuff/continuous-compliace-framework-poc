@@ -145,9 +145,11 @@ The chart renders this into a **Secret** (not a ConfigMap) because tokens and cr
 
 ## OSCAL and the empty UI
 
-CCF starts with **no OSCAL content** (no catalogs, SSPs, assessment plans). That is normal — the UI will look sparse until you:
+CCF starts with **no OSCAL content** by design. On **local**, `values/local.yaml` enables
+`api.seedData.enabled` so a post-install Job imports demo catalogs, SSP, assessment plan,
+results and POA&M automatically. Without that (or manual import), the UI looks bare:
 
-1. **Seed demo data** — `make up SEED=1` imports a small "goodread" dataset via a Helm hook Job.
+1. **Seed demo data** — enabled by default on local; on AKS use `SEED=1`.
 2. **Import your own** — `kubectl exec deploy/ccf-api -- /api oscal import -f document.json`
 3. **Let plugins populate evidence** — agent findings map to controls when policies and catalog structure align.
 
@@ -170,3 +172,9 @@ The agent does **not** expose an application `/metrics` endpoint; its observabil
 | This repo | API `0.16.0`, UI `2.9.1`, Agent `0.7.1` | Tested together |
 
 Pair plugin and policy bundle versions from the same plugin release notes when possible.
+
+## See also
+
+- [Components explained](./components.md) — detailed guide to each CCF piece (API, agent, plugin, policy, OSCAL)
+- [Production deployment](./production.md) — standard prod profile, secrets, alerts, runbook
+- [Helm configuration](./helm-configuration.md) — every values key

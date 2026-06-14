@@ -22,6 +22,25 @@ Config files:
 
 - [`observability/alloy-values.yaml`](../observability/alloy-values.yaml) — log + metric collection
 - [`observability/grafana-values.yaml`](../observability/grafana-values.yaml) — datasources + CCF dashboard
+- [`observability/prometheus-values.yaml`](../observability/prometheus-values.yaml) — CCF alert rules
+
+## Prometheus alerts
+
+`make obs` layers [`prometheus-values.yaml`](../observability/prometheus-values.yaml), which defines rules for:
+
+| Alert | Severity | Trigger |
+|-------|----------|---------|
+| `CCFAPINotReady` | critical | API Deployment has 0 ready replicas (5m) |
+| `CCFUINotReady` | critical | UI Deployment has 0 ready replicas |
+| `CCFAgentNotReady` | critical | Agent Deployment has 0 ready replicas |
+| `CCFPostgresNotReady` | critical | Postgres StatefulSet not ready |
+| `CCFContainerRestartBurst` | warning | >3 restarts in 1h on any CCF pod |
+| `CCFAPIMetricsTargetDown` | warning | API scrape target down (10m) |
+| `CCFAlloyNotReady` / `CCFLokiNotReady` | warning | Observability stack degraded |
+
+View after `make pf-all`: http://localhost:9091/alerts
+
+Alertmanager is **disabled** in the default install. For Slack/PagerDuty, enable Alertmanager in the Prometheus chart and route `severity=critical` labels. See [Production § Observability](./production.md#observability).
 
 ## What gets collected
 

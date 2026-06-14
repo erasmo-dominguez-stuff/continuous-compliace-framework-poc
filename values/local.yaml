@@ -37,6 +37,11 @@ ccf-app:
       firstName: Admin
       lastName: User
       password: "Admin12345!"
+    # Import demo OSCAL on install (catalog + SSP + assessment plan + results +
+    # POA&M) so the UI is not empty. Without this CCF starts with zero OSCAL
+    # content by design. Files: charts/ccf-app/seed/oscal/
+    seedData:
+      enabled: true
     resources:
       requests:
         cpu: 50m

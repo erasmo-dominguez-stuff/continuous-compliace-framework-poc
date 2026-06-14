@@ -1,13 +1,15 @@
 apiVersion: v2
 name: ccf
 description: |
-  Umbrella chart that deploys the full Continuous Compliance Framework (CCF)
-  solution by composing the ccf-app (PostgreSQL + API + UI) and ccf-agent
-  charts. Use it for a single-command install; for independent lifecycles deploy
-  the subcharts directly. See https://continuouscompliance.io/
+  Standard Kubernetes package for the Continuous Compliance Framework (CCF).
+  Production-ready defaults: HA API/UI, PDBs, HPA, network policies, metrics,
+  observability hooks, and hardened agent. Composes ccf-app (PostgreSQL + API +
+  UI) and ccf-agent (plugin scheduler). Layer values/production.yaml for prod.
+  See docs/production.md and https://continuouscompliance.io/
 type: application
 version: 0.1.0
-appVersion: "0.11.0"
+# Tracks the pinned API release (ccf-app Chart appVersion). Agent 0.7.x needs API >= 0.13.
+appVersion: "0.16.0"
 keywords:
   - compliance
   - oscal

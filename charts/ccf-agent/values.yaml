@@ -70,6 +70,28 @@ pdb:
   enabled: false
   minAvailable: 1
 
+# Agent has no HTTP health endpoint; exec probes verify the scheduler process.
+livenessProbe:
+  exec:
+    command:
+      - sh
+      - -c
+      - pgrep -f 'concom agent' >/dev/null
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  exec:
+    command:
+      - sh
+      - -c
+      - test -f /etc/ccf/config.yml && pgrep -f 'concom agent' >/dev/null
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
 resources: {}
 nodeSelector: {}
 tolerations: []

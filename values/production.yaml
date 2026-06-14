@@ -1,0 +1,158 @@
+# Standard CCF production profile (umbrella overlay).
+#
+# Use this as the baseline for any non-local deployment. Layer plugin overlays
+# and secrets at install time — never commit credentials to git.
+#
+#   helm dependency build .
+#   helm upgrade --install ccf . -n ccf --create-namespace \
+#     -f values/production.yaml \
+#     -f values/plugins/github.yaml \
+#     --set-string ccf-agent.config.plugins.github_repos.config.token="$GITHUB_TOKEN" \
+#     --set-string ccf-agent.config.plugins.github_repos.config.organization="$GITHUB_ORG" \
+#     --set-string ccf-app.api.adminUser.password="$ADMIN_PASSWORD"
+#
+# For HA PostgreSQL (Bitnami primary + replicas), also layer:
+#   -f values/production-ha.yaml  PG_PASSWORD='...'
+#
+# See docs/production.md for the full runbook.
+
+ccf-app:
+  enabled: true
+  fullnameOverride: ccf
+
+  postgres:
+    enabled: true
+    auth:
+      existingSecret: ccf-postgres-credentials
+      username: ccf
+      database: ccf
+    persistence:
+      enabled: true
+      storageClass: ""          # CHANGE-ME: backed-up StorageClass
+      size: 20Gi
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: "1", memory: 1Gi }
+    podSecurityContext:
+      fsGroup: 999
+      runAsNonRoot: true
+      seccompProfile: { type: RuntimeDefault }
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"] }
+
+  api:
+    replicaCount: 2
+    environment: production
+    migrations:
+      enabled: true
+    adminUser:
+      enabled: true
+      email: admin@your-org.example
+      firstName: Admin
+      lastName: User
+      password: ""              # inject via --set-string / ADMIN_PASSWORD
+    seedData:
+      enabled: false            # production: import your own OSCAL, not demo seed
+    database:
+      sslmode: require
+      existingSecret: ccf-db-connection
+    metrics:
+      enabled: true
+      service: true
+    resources:
+      requests: { cpu: 200m, memory: 256Mi }
+      limits:   { cpu: "1", memory: 512Mi }
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 75
+    pdb:
+      enabled: true
+      minAvailable: 1
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      fsGroup: 65532
+      seccompProfile: { type: RuntimeDefault }
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: { drop: ["ALL"] }
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: api
+
+  ui:
+    replicaCount: 2
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits:   { cpu: 250m, memory: 128Mi }
+    pdb:
+      enabled: true
+      minAvailable: 1
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: ui
+
+  ingress:
+    enabled: true
+    className: nginx                    # CHANGE-ME
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    uiHost: ccf.example.com             # CHANGE-ME
+    apiHost: api.ccf.example.com        # CHANGE-ME
+    tls:
+      - hosts: [ccf.example.com, api.ccf.example.com]
+        secretName: ccf-tls
+
+  networkPolicy:
+    enabled: true
+    ingressNamespace: ingress-nginx     # CHANGE-ME
+    monitoringNamespaceSelector:
+      kubernetes.io/metadata.name: observability
+
+  tests:
+    enabled: true
+
+ccf-agent:
+  enabled: true
+  fullnameOverride: ccf-agent
+  apiUrl: "http://ccf-api:8080"
+  replicaCount: 1                       # one scheduler per cluster/estate; scale out by deploying more agents elsewhere
+  config:
+    daemon: true
+    verbosity: 1                        # production: less verbose than local (2)
+    plugins: {}                         # CHANGE-ME: layer values/plugins/*.yaml
+  pdb:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
+    seccompProfile: { type: RuntimeDefault }
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: ["ALL"] }
+
+# Built-in Postgres stays on unless you layer production-ha.yaml or point the
+# API at an external database (postgres.enabled=false + api.database.*).
+postgresql:
+  enabled: false

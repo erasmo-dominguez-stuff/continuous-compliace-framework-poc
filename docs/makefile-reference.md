@@ -13,6 +13,7 @@ The `Makefile` automates local (Docker Desktop) and AKS deployments. Run `make h
 | `CHART_DIR` | `.` | Umbrella chart path |
 | `ENV_LOCAL` | `values/local.yaml` | Local environment overlay |
 | `ENV_AKS` | `values/aks.yaml` | AKS environment overlay |
+| `ENV_PROD` | `values/production.yaml` | Production profile overlay |
 | `PLUGIN_VALUES` | `values/plugins/local-ssh.yaml` | Space-separated plugin overlays |
 | `EXTRA_VALUES` | (empty) | Extra overlays, e.g. `values/postgres-ha.yaml` |
 | `GITHUB_TOKEN` | (empty) | Injected to GitHub plugin config (not stored in git) |
@@ -59,13 +60,25 @@ helm upgrade --install ccf . \
 | `make obs-grafana` | Port-forward Grafana only (:3000) |
 | `make obs-loki` | Port-forward Loki only (:3100) |
 
-### AKS
+### AKS / production
 
 | Target | Description |
 |--------|-------------|
 | `make aks` | Install CCF on current kube-context |
+| `make prod` | Production profile (`values/production.yaml`) on current context — requires `ADMIN_PASSWORD` and plugin overlay |
 | `make pf-aks` | Port-forward UI/API on current context |
 | `make install-aks` | Alias for `make aks` |
+
+Production example:
+
+```bash
+# Create Secrets first (see docs/production.md)
+make prod ADMIN_PASSWORD='...' \
+  PLUGIN_VALUES="values/plugins/github.yaml" \
+  GITHUB_TOKEN=... GITHUB_ORG=... \
+  EXTRA_VALUES="values/production-ha.yaml" PG_PASSWORD='...'
+make obs
+```
 
 ### Policies
 

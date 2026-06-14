@@ -1,13 +1,13 @@
 # ccf-agent Helm chart
 
-Deploys the CCF **compliance agent** — a scheduler that:
+Standard CCF **agent** chart — the plugin scheduler that collects evidence and reports to the API.
 
-1. Reads plugin configuration from `/etc/ccf/config.yml` (rendered from a Secret)
-2. Downloads plugin and policy OCI artifacts
-3. Runs plugins on cron schedules
-4. Reports heartbeats and evidence to the CCF API
-
-Image: `ghcr.io/compliance-framework/agent`
+| | |
+|---|---|
+| **CCF role** | Runs plugins on a cron schedule; sends heartbeats, evidence, and templates to the API |
+| **Image** | `ghcr.io/compliance-framework/agent:0.7.1` |
+| **Requires** | CCF API ≥ 0.13.0 (this repo pins API 0.16.0) |
+| **Requires** | At least one plugin in `config.plugins` |
 
 ## Install (standalone)
 
@@ -15,41 +15,51 @@ Image: `ghcr.io/compliance-framework/agent`
 helm upgrade --install ccf-agent . -n ccf \
   -f values-production.yaml \
   -f ../../values/plugins/github.yaml \
-  --set-string config.plugins.github_repos.config.token="$GITHUB_TOKEN"
+  --set-string config.plugins.github_repos.config.token="$GITHUB_TOKEN" \
+  --set-string config.plugins.github_repos.config.organization="$GITHUB_ORG"
 ```
 
-> **At least one plugin is required** or the agent panics at startup.
+## Production profile
 
-## Key values
+`values-production.yaml` includes:
 
-| Key | Description |
-|-----|-------------|
-| `apiUrl` | CCF API URL (default `http://ccf-api:8080`) |
-| `config.plugins` | Plugin definitions (source, policies, schedule, config) |
-| `config.daemon` | Long-running scheduler (`true`) |
-| `extraEnv` / `extraEnvFrom` | Optional API auth env vars |
+- PodDisruptionBudget
+- Resource requests/limits
+- Pod security (non-root, read-only root FS, dropped caps)
+- `verbosity: 1` (less noisy than local)
 
-Plugin overlays live in [`values/plugins/`](../../values/plugins/).
+Deploy **one agent release per estate**. Scale by adding separate releases with different plugins — not by increasing `replicaCount` on the same config.
 
-## Config example
+## Configuration
+
+Plugin and policy config is rendered to a **Secret** mounted at `/etc/ccf/config.yml`:
 
 ```yaml
 config:
+  daemon: true
   plugins:
     github_repos:
-      schedule: "*/30 * * * *"
-      source: ghcr.io/compliance-framework/plugin-github-repositories:v0.8.1
+      source: ghcr.io/compliance-framework/plugin-github-repositories:0.1.0
+      schedule: "0 * * * *"
       policies:
-        - ghcr.io/compliance-framework/plugin-github-repositories-policies:v0.7.0
+        - source: ghcr.io/compliance-framework/plugin-github-repositories-policies:0.1.0
       config:
         organization: my-org
-        token: ""    # inject via --set-string
+        token: ""   # inject via --set-string
 ```
 
-In the umbrella chart, prefix keys with `ccf-agent.`.
+Layer reusable overlays from [`values/plugins/`](../../values/plugins/).
 
-## Full documentation
+## Observability
 
-- [Plugins & policies guide](../../docs/policies-and-plugins.md)
-- [Helm configuration — agent section](../../docs/helm-configuration.md#ccf-agent--agent--plugins)
-- [Architecture](../../docs/architecture.md)
+The agent does **not** expose `/metrics`. Monitor via:
+
+- **Logs** — Loki / `kubectl logs` (plugin errors, heartbeat failures)
+- **Pod metrics** — CPU, memory, restarts via Prometheus/kube-state-metrics
+- **API** — agent heartbeats visible in UI and API
+
+## Documentation
+
+- [Components explained](../../docs/components.md) — agent vs plugin vs policy
+- [Plugins & policies](../../docs/policies-and-plugins.md)
+- [Production deployment](../../docs/production.md)

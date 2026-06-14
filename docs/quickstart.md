@@ -50,14 +50,15 @@ Tear down: `make down`
 
 ## 2. Local demo with populated UI (OSCAL seed)
 
-The UI is empty by default. Import demo catalogs/plans:
+Local installs import demo OSCAL automatically (`api.seedData.enabled: true` in
+`values/local.yaml`). After `make up`, hard-refresh the browser.
 
 ```bash
-make up SEED=1
+make up
 make pf
 ```
 
-This runs a post-install Job that imports the "goodread" OSCAL set from `charts/ccf-app/seed/oscal/`.
+Files imported: `charts/ccf-app/seed/oscal/` (catalog → SSP → plan → results → POA&M).
 
 ---
 

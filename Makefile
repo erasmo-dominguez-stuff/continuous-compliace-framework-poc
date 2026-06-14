@@ -6,6 +6,7 @@
 #   make obs     # start the observability stack (Loki/Prometheus/Grafana/Alloy)
 #   make pf-all  # port-forward everything (CCF UI/API + Grafana/Prometheus/Loki)
 #   make aks     # install CCF on AKS (current kube-context)
+#   make prod    # production profile on current kube-context (see docs/production.md)
 #   make policy  # validate + unit-test the custom Rego policies
 #   make down    # uninstall the CCF release
 #
@@ -40,6 +41,7 @@ KUBECTL      := kubectl --context $(KUBE_CONTEXT)
 # Layered: environment first, then one or more reusable plugin overlays.
 ENV_LOCAL ?= values/local.yaml
 ENV_AKS   ?= values/aks.yaml
+ENV_PROD  ?= values/production.yaml
 
 # Space-separated list of plugin overlays to layer on top (override freely).
 PLUGIN_VALUES ?= values/plugins/local-ssh.yaml
@@ -177,6 +179,17 @@ aks: deps ## (AKS) Install CCF on the CURRENT kube-context with the aks overlay
 .PHONY: install-aks
 install-aks: aks # Backwards-compatible alias for `make aks`
 
+.PHONY: prod
+prod: deps ## Production CCF on current kube-context (values/production.yaml + optional overlays)
+	@test -n "$(ADMIN_PASSWORD)" || { echo "ADMIN_PASSWORD is required. Create K8s Secrets first — see docs/production.md"; exit 1; }
+	@test -n "$(strip $(PLUGIN_VALUES))" && test "$(PLUGIN_VALUES)" != "values/plugins/local-ssh.yaml" || \
+		{ echo "WARNING: production agent needs at least one plugin overlay (PLUGIN_VALUES=values/plugins/github.yaml)"; }
+	@echo "Deploying production profile to: $$(kubectl config current-context)"
+	helm upgrade --install $(RELEASE) $(CHART_DIR) \
+		--namespace $(NAMESPACE) --create-namespace \
+		-f $(ENV_PROD) $(OVERLAY_ARGS) --wait --timeout 10m
+	@echo "Production CCF installed. Next: make obs && make pf-aks  (or configure ingress in values/production.yaml)"
+
 ## ---------------------------------------------------------------- build & test
 .PHONY: deps
 deps: # Build umbrella chart dependencies (vendored subchart .tgz)
@@ -208,6 +221,16 @@ template-all: deps # Render every environment x plugin overlay combination (no c
 		helm template $(RELEASE) $(CHART_DIR) -f $$env -f values/postgres-ha.yaml \
 			--set-string postgresql.auth.password=dummy \
 			--set-string ccf-app.postgres.auth.password=dummy >/dev/null; \
+	done; \
+	for prod in values/production.yaml values/production-ha.yaml; do \
+		echo "--- $$prod (base) ---"; \
+		helm template $(RELEASE) $(CHART_DIR) -f $$prod \
+			--set-string ccf-app.api.adminUser.password=dummy \
+			--set-string postgresql.auth.password=dummy >/dev/null; \
+		echo "--- values/aks.yaml + $$prod ---"; \
+		helm template $(RELEASE) $(CHART_DIR) -f values/aks.yaml -f $$prod \
+			--set-string ccf-app.api.adminUser.password=dummy \
+			--set-string postgresql.auth.password=dummy >/dev/null; \
 	done; \
 	echo "all combinations rendered successfully"
 
@@ -286,7 +309,8 @@ obs-stack: obs-repos # Install Loki + Prometheus + Grafana (pre-provisioned) for
 		--namespace $(OBS_NAMESPACE) --create-namespace \
 		--set server.extraFlags="{web.enable-remote-write-receiver}" \
 		--set alertmanager.enabled=false \
-		--set prometheus-pushgateway.enabled=false
+		--set prometheus-pushgateway.enabled=false \
+		-f observability/prometheus-values.yaml
 	helm upgrade --install ccf-grafana grafana/grafana $(HELM_CTX) \
 		--namespace $(OBS_NAMESPACE) --create-namespace \
 		-f observability/grafana-values.yaml

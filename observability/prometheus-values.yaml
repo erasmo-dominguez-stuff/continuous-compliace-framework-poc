@@ -1,0 +1,90 @@
+# Prometheus values overlay for CCF observability.
+# Used by `make obs` together with the base prometheus-community chart flags.
+#
+# Ships PrometheusRule-style alerts as serverFiles (works without Alertmanager;
+# wire Alertmanager later for notifications).
+
+serverFiles:
+  alerting_rules.yml:
+    groups:
+      - name: ccf.availability
+        rules:
+          - alert: CCFAPINotReady
+            expr: kube_deployment_status_replicas_available{namespace="ccf", deployment="ccf-api"} < 1
+            for: 5m
+            labels:
+              severity: critical
+              component: api
+            annotations:
+              summary: CCF API has no ready replicas
+              description: Deployment ccf-api in namespace ccf has zero available replicas for 5 minutes.
+
+          - alert: CCFUINotReady
+            expr: kube_deployment_status_replicas_available{namespace="ccf", deployment="ccf-ui"} < 1
+            for: 5m
+            labels:
+              severity: critical
+              component: ui
+            annotations:
+              summary: CCF UI has no ready replicas
+
+          - alert: CCFAgentNotReady
+            expr: kube_deployment_status_replicas_available{namespace="ccf", deployment="ccf-agent"} < 1
+            for: 5m
+            labels:
+              severity: critical
+              component: agent
+            annotations:
+              summary: CCF Agent has no ready replicas
+
+          - alert: CCFPostgresNotReady
+            expr: kube_statefulset_status_replicas_ready{namespace="ccf", statefulset="ccf-postgres"} < 1
+            for: 5m
+            labels:
+              severity: critical
+              component: postgres
+            annotations:
+              summary: CCF PostgreSQL StatefulSet is not ready
+
+      - name: ccf.stability
+        rules:
+          - alert: CCFContainerRestartBurst
+            expr: increase(kube_pod_container_status_restarts_total{namespace="ccf"}[1h]) > 3
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: CCF pod {{ $labels.pod }} restarting frequently
+              description: Container {{ $labels.container }} restarted more than 3 times in the last hour.
+
+          - alert: CCFAPIMetricsTargetDown
+            expr: up{job="ccf"} == 0
+            for: 10m
+            labels:
+              severity: warning
+              component: api
+            annotations:
+              summary: CCF API Prometheus scrape target is down
+              description: Alloy/Prometheus cannot scrape the API metrics endpoint.
+
+      - name: ccf.observability
+        rules:
+          - alert: CCFAlloyNotReady
+            expr: kube_deployment_status_replicas_available{namespace="observability", deployment=~"ccf-alloy.*"} < 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: Grafana Alloy collector is not ready
+              description: Log and metric collection for CCF may be interrupted.
+
+          - alert: CCFLokiNotReady
+            expr: kube_statefulset_status_replicas_ready{namespace="observability", statefulset=~"loki.*"} < 1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: Loki is not ready in observability namespace
+
+server:
+  # Retain default flags from Makefile obs-stack; this file layers alert rules only.

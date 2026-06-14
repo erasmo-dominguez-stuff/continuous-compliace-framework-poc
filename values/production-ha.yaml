@@ -1,0 +1,51 @@
+# Production + high-availability overlay.
+#
+# Layers on top of values/production.yaml (or values/aks.yaml):
+#   - Bitnami PostgreSQL HA (primary + read replica, PDBs, metrics)
+#   - Disables the lightweight built-in StatefulSet
+#   - API/UI already run 2+ replicas from values/production.yaml
+#
+#   make aks EXTRA_VALUES="values/production.yaml values/production-ha.yaml" \
+#     PG_PASSWORD='...' ADMIN_PASSWORD='...'
+
+postgresql:
+  enabled: true
+  architecture: replication
+  auth:
+    username: ccf
+    database: ccf
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: managed-csi     # CHANGE-ME for your cloud
+    pdb:
+      create: true
+      minAvailable: 1
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits:   { cpu: "1", memory: 1Gi }
+  readReplicas:
+    replicaCount: 1
+    persistence:
+      enabled: true
+      size: 20Gi
+    pdb:
+      create: true
+      minAvailable: 0
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
+      limits:   { cpu: 500m, memory: 1Gi }
+  metrics:
+    enabled: true
+
+ccf-app:
+  postgres:
+    enabled: false
+    auth:
+      username: ccf
+      database: ccf
+  api:
+    database:
+      host: ccf-postgresql-primary
+      sslmode: require

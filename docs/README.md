@@ -33,10 +33,12 @@ flowchart TB
 | Guide | What you'll learn |
 |-------|-------------------|
 | [Quick start](./quickstart.md) | Local demo, AKS, GitHub plugin demo, observability, full workflows |
+| [**Components explained**](./components.md) | What PostgreSQL, API, UI, Agent, Plugin, Policy, and OSCAL mean in CCF |
+| [**Production deployment**](./production.md) | Standard prod profile, secrets, HA, alerts, runbook |
 | [Architecture](./architecture.md) | Control plane, agent, plugins, policies, OSCAL, data flow |
 | [Helm configuration](./helm-configuration.md) | Values layering, every chart knob, secrets, hooks, HA |
 | [Plugins & policies](./policies-and-plugins.md) | Configure plugins, author Rego, build OCI bundles, wire them in |
-| [Observability](./observability.md) | Loki, Prometheus, Grafana, Alloy, dashboards |
+| [Observability](./observability.md) | Loki, Prometheus, Grafana, Alloy, dashboards, alert rules |
 | [Makefile reference](./makefile-reference.md) | All `make` targets, variables, and examples |
 
 ## Repository layout
@@ -48,6 +50,8 @@ flowchart TB
 ├── values/
 │   ├── local.yaml             Docker Desktop overlay
 │   ├── aks.yaml               AKS overlay
+│   ├── production.yaml        Standard production profile (HA, PDB, ingress)
+│   ├── production-ha.yaml     Production + Bitnami PostgreSQL HA
 │   ├── postgres-ha.yaml       Bitnami HA Postgres + app-tier HA
 │   └── plugins/               Reusable agent plugin overlays
 ├── charts/
@@ -74,6 +78,7 @@ make obs         # observability stack (Loki/Prometheus/Grafana/Alloy)
 make pf-all      # port-forward UI, API, Grafana, Prometheus, Loki
 
 make aks         # CCF on AKS (current kube-context)
+make prod        # production profile (current kube-context)
 make policy      # validate + test custom Rego policies
 make validate    # offline helm lint + render all overlays
 ```

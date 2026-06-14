@@ -1,9 +1,10 @@
 apiVersion: v2
 name: ccf-app
 description: |
-  Continuous Compliance Framework control plane: PostgreSQL datastore, central
-  API and web UI. The compliance Agent is packaged separately (ccf-agent).
-  See https://continuouscompliance.io/
+  Standard CCF control-plane chart: PostgreSQL datastore, central API (OSCAL
+  reporting), and web UI. Includes migrations, admin bootstrap, optional OSCAL
+  seed, metrics, PDB/HPA, ingress, and network policies. Pair with ccf-agent.
+  See docs/components.md and https://continuouscompliance.io/
 type: application
 version: 0.1.0
 # API image tag (ccf-app.api.image.tag defaults to this). Must be >= 0.13.0 for

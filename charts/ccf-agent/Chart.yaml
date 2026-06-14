@@ -1,9 +1,10 @@
 apiVersion: v2
 name: ccf-agent
 description: |
-  Continuous Compliance Framework Agent: a lightweight scheduler/orchestrator
-  for compliance plugins and policies. Deploy independently (often many times,
-  with different plugin sets) against a CCF API. See https://continuouscompliance.io/
+  Standard CCF agent chart: scheduler/orchestrator for compliance plugins and
+  Rego policy bundles. Deploy one release per estate; layer values/plugins/*.yaml
+  for GitHub, cloud, or custom collectors. See docs/components.md and
+  docs/policies-and-plugins.md.
 type: application
 version: 0.1.0
 appVersion: "0.7.1"

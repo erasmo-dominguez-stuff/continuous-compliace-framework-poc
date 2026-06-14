@@ -30,11 +30,13 @@ flowchart LR
 | Guide | Topics |
 |-------|--------|
 | [**Quick start**](./docs/quickstart.md) | Local demo, GitHub demo, AKS, observability, smoke tests |
+| [**Components explained**](./docs/components.md) | What each CCF piece is (API, agent, plugin, policy, OSCAL, …) |
+| [**Production deployment**](./docs/production.md) | Standard prod profile, reliability, secrets, alerts, runbook |
 | [**Architecture**](./docs/architecture.md) | How CCF, agent, plugins, policies, and OSCAL fit together |
 | [**Helm configuration**](./docs/helm-configuration.md) | Values layering, every chart option, secrets, hooks, production |
 | [**Plugins & policies**](./docs/policies-and-plugins.md) | Configure plugins, write Rego, build OCI bundles, deploy |
 | [**Makefile reference**](./docs/makefile-reference.md) | All targets, variables, port-forwards |
-| [**Observability**](./docs/observability.md) | Logs, metrics, Grafana dashboard |
+| [**Observability**](./docs/observability.md) | Logs, metrics, Grafana dashboard, Prometheus alerts |
 
 ## Quick commands
 
@@ -53,17 +55,33 @@ make down        # uninstall CCF
 
 **Local login** (after `make up` + `make pf`): http://localhost:8000 — `admin@ccf.local` / `Admin12345!`
 
-**Populate the UI** (empty by default): `make up SEED=1`
+**Populate the UI** (OSCAL demo data): enabled by default on local (`values/local.yaml`). On AKS: `make aks SEED=1`
 
 **GitHub org demo**: see [Quick start §3](./docs/quickstart.md#3-github-organisation-demo)
 
 ## Chart structure
 
+This repository is the **standard CCF Helm package** for Kubernetes — production-ready defaults, observability integration, and full documentation.
+
 ```
 ccf/                       umbrella (single-command install)
 └── charts/
-    ├── ccf-app/           PostgreSQL + API + UI  (one lifecycle)
-    └── ccf-agent/         plugin scheduler       (independent lifecycle)
+    ├── ccf-app/           PostgreSQL + API + UI  (control plane)
+    └── ccf-agent/         plugin scheduler       (collection layer)
+```
+
+| Profile | Values file | Use case |
+|---------|-------------|----------|
+| Local demo | `values/local.yaml` | Docker Desktop, seed OSCAL, port-forward |
+| Cloud base | `values/aks.yaml` | AKS / generic cloud tweaks |
+| **Production** | `values/production.yaml` | HA, PDB, HPA, ingress, networkPolicy, metrics |
+| **Production HA DB** | `values/production-ha.yaml` | Bitnami PostgreSQL replication |
+
+```bash
+# Production (Secrets required first — see docs/production.md)
+make prod ADMIN_PASSWORD='...' PLUGIN_VALUES="values/plugins/github.yaml" \
+  GITHUB_TOKEN=... GITHUB_ORG=...
+make obs    # Loki + Prometheus alerts + Grafana dashboard
 ```
 
 | Component | Image | Purpose |
@@ -82,11 +100,13 @@ Layer environment + plugins + optional overlays:
 ```
 values.yaml                  umbrella defaults
 values/local.yaml            Docker Desktop
-values/aks.yaml              AKS
+values/aks.yaml              AKS / cloud base
+values/production.yaml       standard production profile
+values/production-ha.yaml      production + Bitnami HA Postgres
 values/postgres-ha.yaml      Bitnami HA Postgres + app HA
 values/plugins/              reusable plugin configs
 policies/                    custom Rego (author → bundle → OCI)
-observability/               Grafana + Alloy values
+observability/               Grafana + Alloy + Prometheus alert rules
 ```
 
 Umbrella keys are prefixed: `ccf-app.api.*`, `ccf-agent.config.plugins.*`.
